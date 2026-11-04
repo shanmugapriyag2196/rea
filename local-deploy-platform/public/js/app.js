@@ -780,6 +780,126 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // GitHub connect
+  document.getElementById("github-connect-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const repoUrl = document.getElementById("github-repo-url").value;
+    const branch = document.getElementById("github-branch").value;
+    const token = document.getElementById("github-token").value;
+
+    if (!repoUrl || !token) {
+      showToast("Repository URL and token are required", "error");
+      return;
+    }
+
+    try {
+      showToast("Connecting to GitHub...", "info");
+      const result = await api(`/projects/${currentProjectId}/github/connect`, {
+        method: "POST",
+        body: JSON.stringify({ repoUrl, token, branch }),
+      });
+      document.getElementById("github-connect-form").style.display = "none";
+      document.getElementById("github-connected").style.display = "block";
+      document.getElementById("github-repo-display").textContent = repoUrl;
+      document.getElementById("github-branch-display").textContent = branch;
+      showToast("GitHub connected", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
+  // Sync GitHub commits
+  window.syncGitHubCommits = async () => {
+    if (!currentProjectId) return;
+    try {
+      showToast("Syncing commits...", "info");
+      const result = await api(`/projects/${currentProjectId}/github/sync`, {
+        method: "POST",
+      });
+      const ts = result.project?.github_last_synced_at
+        ? new Date(result.project.github_last_synced_at).toLocaleString()
+        : "Just now";
+      document.getElementById("github-synced-display").textContent = ts;
+      loadCommits(currentProjectId);
+      showToast(`Synced ${result.count} commits`, "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  // Disconnect GitHub
+  window.disconnectGitHub = async () => {
+    if (!currentProjectId) return;
+    try {
+      await api(`/projects/${currentProjectId}/github/disconnect`, {
+        method: "DELETE",
+      });
+      document.getElementById("github-connected").style.display = "none";
+      document.getElementById("github-connect-form").style.display = "block";
+      document.getElementById("github-connect-form").querySelectorAll("input").forEach((i) => (i.value = ""));
+      document.getElementById("commits-list-wrap").style.display = "none";
+      document.getElementById("commits-empty").style.display = "block";
+      showToast("GitHub disconnected", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  // Load commits
+  window.loadCommits = async (projectId) => {
+    const tbody = document.getElementById("commits-table-body");
+    const empty = document.getElementById("commits-empty");
+    const wrap = document.getElementById("commits-list-wrap");
+    try {
+      const data = await api(`/projects/${projectId}/github/commits?limit=50`);
+      if (!data.commits || data.commits.length === 0) {
+        wrap.style.display = "none";
+        empty.style.display = "block";
+        return;
+      }
+      empty.style.display = "none";
+      wrap.style.display = "block";
+      tbody.innerHTML = data.commits
+        .map(
+          (c) => `
+          <tr>
+            <td><code>${c.sha.slice(0, 7)}</code></td>
+            <td>${escapeHtml(c.message)}</td>
+            <td>${escapeHtml(c.authorName)}</td>
+            <td>${c.authorDate ? new Date(c.authorDate).toLocaleString() : "-"}</td>
+            <td>
+              <a href="${c.htmlUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">View on GitHub</a>
+            </td>
+          </tr>
+        `
+        )
+        .join("");
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:red">Error: ${escapeHtml(err.message)}</td></tr>`;
+    }
+  };
+
+  // Also load commits when viewing project
+  const origViewProject = window.viewProject;
+  window.viewProject = (id) => {
+    origViewProject(id);
+    setTimeout(() => {
+      // Check if GitHub is connected
+      api(`/projects/${id}`).then((p) => {
+        if (p.github_repo_url) {
+          document.getElementById("github-connect-form").style.display = "none";
+          document.getElementById("github-connected").style.display = "block";
+          document.getElementById("github-repo-display").textContent = p.github_repo_url;
+          document.getElementById("github-branch-display").textContent = p.github_branch || "main";
+          document.getElementById("github-synced-display").textContent = p.github_last_synced_at
+            ? new Date(p.github_last_synced_at).toLocaleString()
+            : "Never";
+          loadCommits(id);
+        }
+      }).catch(() => {});
+    }, 100);
+  };
+
   // Modal close on overlay click
   document.querySelectorAll(".modal-overlay").forEach((overlay) => {
     overlay.addEventListener("click", (e) => {

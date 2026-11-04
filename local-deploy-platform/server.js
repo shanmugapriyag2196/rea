@@ -19,6 +19,7 @@ const {
   listDeployments,
   updateDeployment,
   getNextVersion,
+  run,
   setEnvVar,
   listEnvVars,
   deleteEnvVar,
@@ -26,6 +27,10 @@ const {
   listDomains,
   verifyDomain,
   deleteDomain,
+  setProjectGitHub,
+  upsertCommit,
+  listCommits,
+  deleteCommits,
   now,
   generateId,
 } = require("./database");
@@ -42,6 +47,53 @@ for (const dir of [WORKSPACE_DIR, ARTIFACT_DIR, LOG_DIR]) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+}
+
+async function fetchCommitsFromGitHub(owner, repo, token, branch = "main", perPage = 100) {
+  const commits = [];
+  let page = 1;
+  let hasMore = true;
+
+  while (hasMore) {
+    const url = `https://api.github.com/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${perPage}&page=${page}`;
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `token ${token}`,
+        "User-Agent": "VG-Deploy-Platform",
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (!Array.isArray(data) || data.length === 0) {
+      hasMore = false;
+      break;
+    }
+
+    for (const c of data) {
+      commits.push({
+        sha: c.sha,
+        message: c.commit.message,
+        authorName: c.commit.author?.name || "Unknown",
+        authorEmail: c.commit.author?.email || "",
+        authorDate: c.commit.author?.date || "",
+        url: c.url,
+        htmlUrl: c.html_url,
+      });
+    }
+
+    if (data.length < perPage) {
+      hasMore = false;
+    } else {
+      page++;
+    }
+  }
+
+  return { commits, count: commits.length };
 }
 
 const app = express();
@@ -617,6 +669,96 @@ app.delete("/api/domains/:id", (req, res) => {
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete domain", message: err.message });
+  }
+});
+
+// ---- GitHub Commits ----
+app.post("/api/projects/:projectId/github/connect", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { repoUrl, token, branch = "main" } = req.body;
+
+    if (!repoUrl || typeof repoUrl !== "string") {
+      return res.status(400).json({ error: "Repository URL is required" });
+    }
+
+    const project = getProjectById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    setProjectGitHub(projectId, repoUrl, token, branch);
+    res.json({ success: true, project });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to connect GitHub", message: err.message });
+  }
+});
+
+app.post("/api/projects/:projectId/github/sync", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = getProjectById(projectId);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const { github_repo_url: repoUrl, github_token: token, github_branch: branch = "main" } = project;
+    if (!repoUrl || !token) {
+      return res.status(400).json({ error: "GitHub not connected for this project" });
+    }
+
+    // Extract owner/repo from URL
+    const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(\.git)?$/);
+    if (!match) {
+      return res.status(400).json({ error: "Invalid GitHub repository URL" });
+    }
+    const [, owner, repo] = match;
+
+    deleteCommits(projectId);
+
+    const { commits } = await fetchCommitsFromGitHub(owner, repo, token, branch);
+
+    for (const c of commits) {
+      upsertCommit(
+        projectId,
+        c.sha,
+        c.message,
+        c.authorName,
+        c.authorEmail,
+        c.authorDate,
+        c.url,
+        c.htmlUrl
+      );
+    }
+
+    const ts = now();
+    run("UPDATE projects SET github_last_synced_at = ?, updated_at = ? WHERE id = ?", [ts, ts, projectId]);
+
+    res.json({ success: true, commits, count: commits.length });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to sync commits", message: err.message });
+  }
+});
+
+app.get("/api/projects/:projectId/github/commits", (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { limit = 50 } = req.query;
+    const commits = listCommits(projectId, parseInt(limit, 10));
+    res.json({ commits });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list commits", message: err.message });
+  }
+});
+
+app.delete("/api/projects/:projectId/github/disconnect", (req, res) => {
+  try {
+    const { projectId } = req.params;
+    deleteCommits(projectId);
+    setProjectGitHub(projectId, "", "", "main");
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to disconnect", message: err.message });
   }
 });
 

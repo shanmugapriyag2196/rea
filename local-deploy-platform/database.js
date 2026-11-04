@@ -90,11 +90,49 @@ function initSchema() {
       UNIQUE(project_id, name)
     );
 
+    CREATE TABLE IF NOT EXISTS repository_commits (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      sha TEXT NOT NULL,
+      message TEXT,
+      author_name TEXT,
+      author_email TEXT,
+      author_date TEXT,
+      url TEXT,
+      html_url TEXT,
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+      UNIQUE(project_id, sha)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_deployments_project ON deployments(project_id);
     CREATE INDEX IF NOT EXISTS idx_deployments_status ON deployments(status);
     CREATE INDEX IF NOT EXISTS idx_env_vars_project ON environment_variables(project_id);
     CREATE INDEX IF NOT EXISTS idx_domains_project ON domains(project_id);
+    CREATE INDEX IF NOT EXISTS idx_commits_project ON repository_commits(project_id);
   `);
+
+  // Add GitHub columns to existing projects tables (migration)
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_repo_url TEXT;`);
+  } catch (e) {
+    // Column may already exist
+  }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_token TEXT;`);
+  } catch (e) {
+    // Column may already exist
+  }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_branch TEXT DEFAULT 'main';`);
+  } catch (e) {
+    // Column may already exist
+  }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_last_synced_at INTEGER;`);
+  } catch (e) {
+    // Column may already exist
+  }
 
   saveDb();
 }
@@ -326,6 +364,57 @@ function deleteDomain(id) {
   saveDb();
 }
 
+// ---- GitHub commits ----
+
+function setProjectGitHub(projectId, repoUrl, token, branch = "main") {
+  const ts = now();
+  run(
+    "UPDATE projects SET github_repo_url = ?, github_token = ?, github_branch = ?, github_last_synced_at = ?, updated_at = ? WHERE id = ?",
+    [repoUrl, token, branch, ts, ts, projectId]
+  );
+  saveDb();
+  return getProjectById(projectId);
+}
+
+function upsertCommit(projectId, sha, message, authorName, authorEmail, authorDate, url, htmlUrl) {
+  const id = generateId();
+  const ts = now();
+  const existing = get(
+    "SELECT id FROM repository_commits WHERE project_id = ? AND sha = ?",
+    [projectId, sha]
+  );
+  if (existing) {
+    run(
+      "UPDATE repository_commits SET message = ?, author_name = ?, author_email = ?, author_date = ?, url = ?, html_url = ? WHERE id = ?",
+      [message, authorName, authorEmail, authorDate, url, htmlUrl, existing.id]
+    );
+    saveDb();
+    return getCommitById(existing.id);
+  }
+  run(
+    "INSERT INTO repository_commits (id, project_id, sha, message, author_name, author_email, author_date, url, html_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, projectId, sha, message, authorName, authorEmail, authorDate, url, htmlUrl, ts]
+  );
+  saveDb();
+  return getCommitById(id);
+}
+
+function getCommitById(id) {
+  return get("SELECT * FROM repository_commits WHERE id = ?", [id]);
+}
+
+function listCommits(projectId, limit = 50) {
+  return all(
+    "SELECT * FROM repository_commits WHERE project_id = ? ORDER BY author_date DESC LIMIT ?",
+    [projectId, limit]
+  );
+}
+
+function deleteCommits(projectId) {
+  run("DELETE FROM repository_commits WHERE project_id = ?", [projectId]);
+  saveDb();
+}
+
 // Close on process exit
 process.on("exit", () => {
   if (db) {
@@ -351,6 +440,7 @@ module.exports = {
   listDeployments,
   updateDeployment,
   getNextVersion,
+  run,
   setEnvVar,
   listEnvVars,
   deleteEnvVar,
@@ -358,6 +448,11 @@ module.exports = {
   listDomains,
   verifyDomain,
   deleteDomain,
+  setProjectGitHub,
+  upsertCommit,
+  getCommitById,
+  listCommits,
+  deleteCommits,
   now,
   generateId,
 };
