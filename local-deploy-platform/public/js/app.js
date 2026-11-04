@@ -707,7 +707,36 @@ document.addEventListener("DOMContentLoaded", () => {
 window.viewDeployment = viewDeployment;
 window.rollbackDeployment = rollbackDeployment;
 window.deleteProject = deleteProject;
-function viewProject(id) {
+function loadProjectDeployments(projectId) {
+  const tbody = document.getElementById("project-deployments-tbody");
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+  api(`/projects/${projectId}/deployments`)
+    .then((data) => {
+      if (!data.deployments || data.deployments.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5">No deployments yet</td></tr>';
+        return;
+      }
+      tbody.innerHTML = "";
+      for (const d of data.deployments) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${d.id.slice(0, 8)}...</td>
+          <td>${escapeHtml(d.status)}</td>
+          <td>${d.created_at ? formatDate(d.created_at) : "-"}</td>
+          <td>${escapeHtml(d.commit_sha ? d.commit_sha.slice(0, 7) : "-")}</td>
+          <td>
+            <button class="btn btn-sm" onclick="viewDeployment('${d.id}')">View</button>
+            ${d.status === "success" ? `<button class="btn btn-sm" onclick="rollbackDeployment('${d.id}')">Rollback</button>` : ""}
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    })
+    .catch((e) => {
+      tbody.innerHTML = `<tr><td colspan="5" style="color:red">Error: ${escapeHtml(e.message)}</td></tr>`;
+    });
+}
   const project = projects.find(p => p.id === id);
   if (!project) {
     showToast("Project not found", "error");

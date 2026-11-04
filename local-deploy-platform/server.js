@@ -458,6 +458,26 @@ app.post("/api/deployments/:deploymentId/rollback", (req, res) => {
   }
 });
 
+app.get("/api/projects/:projectId/deployments", (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const deployments = db
+      .prepare(
+        `
+      SELECT d.*, p.name as project_name
+      FROM deployments d
+      JOIN projects p ON p.id = d.project_id
+      WHERE d.project_id = ?
+      ORDER BY d.created_at DESC
+    `
+      )
+      .all(projectId);
+    res.json({ deployments });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/api/deployments/:deploymentId/logs", (req, res) => {
   try {
     const deployment = getDeploymentById(req.params.deploymentId);
@@ -655,7 +675,7 @@ app.use("/deployments", (req, res, next) => {
   }
 });
 
-app.post("/projects/import-git", async (req, res) => {
+app.post("/api/projects/import-git", async (req, res) => {
   try {
     const { repoUrl, projectName } = req.body;
 
