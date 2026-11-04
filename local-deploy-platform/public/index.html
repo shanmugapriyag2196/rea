@@ -93,8 +93,9 @@
           <h1 class="section-title">Projects</h1>
           <p class="section-subtitle">Manage your projects</p>
         </div>
-        <div class="projects-header">
+        <div class="projects-header" style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem;">
           <button class="btn btn-primary" id="show-create-project-form">New Project</button>
+          <button class="btn btn-outline" id="show-import-git-form">Import Git Repository</button>
         </div>
         
         <div class="card" id="create-project-form-container" style="display:none; margin-bottom: 1.5rem;">
@@ -115,12 +116,33 @@
                 <option value="static">Static HTML/CSS/JS</option>
                 <option value="vite">Vite</option>
                 <option value="react">React</option>
+                <option value="nextjs">Next.js</option>
                 <option value="other">Other</option>
               </select>
             </div>
             <div style="display: flex; gap: 0.75rem;">
               <button type="submit" class="btn btn-primary">Create Project</button>
               <button type="button" class="btn btn-outline" id="cancel-create-project-inline">Cancel</button>
+            </div>
+          </form>
+        </div>
+        
+        <div class="card" id="import-git-form-container" style="display:none; margin-bottom: 1.5rem;">
+          <h3 style="margin-bottom: 1rem;">Import Git Repository</h3>
+          <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">Import a repository from GitHub, GitLab, or other Git providers</p>
+          <form id="import-git-form">
+            <div class="form-group">
+              <label for="git-repo-url">Repository URL</label>
+              <input type="url" id="git-repo-url" name="repoUrl" placeholder="https://github.com/username/repo" required>
+              <p class="field-hint">Enter the repository URL</p>
+            </div>
+            <div class="form-group">
+              <label for="git-project-name">Project Name</label>
+              <input type="text" id="git-project-name" name="projectName" required>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+              <button type="submit" class="btn btn-primary">Import</button>
+              <button type="button" class="btn btn-outline" id="cancel-import-git">Cancel</button>
             </div>
           </form>
         </div>

@@ -655,7 +655,56 @@ app.use("/deployments", (req, res, next) => {
   }
 });
 
-// ---------- 404 ----------
+app.post("/projects/import-git", async (req, res) => {
+  try {
+    const { repoUrl, projectName } = req.body;
+
+    if (!repoUrl || typeof repoUrl !== "string") {
+      return res.status(400).json({ error: "Repository URL is required" });
+    }
+    if (!projectName || typeof projectName !== "string") {
+      return res.status(400).json({ error: "Project name is required" });
+    }
+
+    const trimmed = projectName.trim();
+    if (getProjectByName(trimmed)) {
+      return res.status(409).json({ error: "Project with this name already exists" });
+    }
+
+    const project = createProject(trimmed, `Imported from ${repoUrl}`, "static");
+    const projectWorkspace = path.join(WORKSPACE_DIR, project.id);
+    fs.mkdirSync(projectWorkspace, { recursive: true });
+
+    const repoDir = path.join(projectWorkspace, "repo");
+    const gitClone = spawn("git", ["clone", "--depth", "1", repoUrl, repoDir], { cwd: projectWorkspace });
+
+    gitClone.on("close", (code) => {
+      if (code !== 0) {
+        deleteProject(project.id);
+        return res.status(500).json({
+          error: "Failed to clone repository",
+          message: "Git clone failed. Check the URL and permissions.",
+        });
+      }
+
+      res.status(201).json({
+        project,
+        message: "Repository imported successfully",
+        path: repoDir,
+      });
+    });
+
+    gitClone.on("error", (err) => {
+      deleteProject(project.id);
+      return res.status(500).json({
+        error: "Failed to clone repository",
+        message: err.message,
+      });
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to import repository", message: err.message });
+  }
+});
 app.use((req, res) => {
   if (req.path.startsWith("/api/")) {
     res.status(404).json({ error: "API endpoint not found" });
