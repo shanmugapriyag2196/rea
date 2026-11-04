@@ -4,9 +4,10 @@ const express = require("express");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
-const { Worker } = require("worker_threads");
+const zlib = require("zlib");
 
 const {
+  initPromise,
   createProject,
   getProjectById,
   getProjectByName,
@@ -67,8 +68,8 @@ const tmpUploadDir = path.join(__dirname, "logs", "tmp-uploads");
 if (!fs.existsSync(tmpUploadDir)) {
   fs.mkdirSync(tmpUploadDir, { recursive: true });
 }
-
 // ---------- Helpers ----------
+
 function isSafeZipEntry(entryName) {
   const normalized = path.normalize(entryName);
   if (normalized.startsWith("..") || path.isAbsolute(normalized)) {
@@ -79,6 +80,111 @@ function isSafeZipEntry(entryName) {
     if (part === "..") return false;
   }
   return true;
+}
+
+function parseZipBuffer(buffer) {
+  const entries = [];
+  let offset = 0;
+  const maxLen = buffer.length;
+
+  while (offset < maxLen - 4) {
+    const sig = buffer.readUInt32LE(offset);
+    if (sig !== 0x04034b50) break;
+
+    const compressionMethod = buffer.readUInt16LE(offset + 8);
+    const compressedSize = buffer.readUInt32LE(offset + 18);
+    const uncompressedSize = buffer.readUInt32LE(offset + 22);
+    const fileNameLength = buffer.readUInt16LE(offset + 26);
+    const extraFieldLength = buffer.readUInt16LE(offset + 28);
+
+    const nameStart = offset + 30;
+    const nameEnd = nameStart + fileNameLength;
+    if (nameEnd > maxLen) break;
+
+    const fileName = buffer.slice(nameStart, nameEnd).toString("utf8");
+    const dataStart = nameEnd + extraFieldLength;
+    const dataEnd = dataStart + compressedSize;
+
+    entries.push({
+      name: fileName,
+      compressedSize,
+      uncompressedSize,
+      compressionMethod,
+      dataStart,
+      dataEnd,
+    });
+
+    offset = dataEnd;
+  }
+
+  return entries;
+}
+
+function safeExtractZip(zipPath, destDir) {
+  const MAX_FILES = 10000;
+  const MAX_TOTAL_SIZE = 1024 * 1024 * 1024; // 1 GB
+
+  const fd = fs.openSync(zipPath, "r");
+  const stat = fs.fstatSync(fd);
+  const buffer = Buffer.alloc(stat.size);
+  fs.readSync(fd, buffer, 0, stat.size, 0);
+  fs.closeSync(fd);
+
+  const entries = parseZipBuffer(buffer);
+  const extracted = [];
+  let totalSize = 0;
+  let fileCount = 0;
+
+  if (entries.length > MAX_FILES) {
+    throw new Error(`Too many files in archive: ${entries.length} (max ${MAX_FILES})`);
+  }
+
+  for (const entry of entries) {
+    if (!isSafeZipEntry(entry.name)) {
+      throw new Error(`Unsafe ZIP entry detected: ${entry.name}`);
+    }
+
+    if (entry.name.endsWith("/") || entry.name.endsWith("\\")) {
+      continue;
+    }
+
+    const targetPath = path.join(destDir, entry.name);
+    const targetDir = path.dirname(targetPath);
+
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+
+    if (entry.compressionMethod === 0) {
+      fs.writeFileSync(targetPath, buffer.slice(entry.dataStart, entry.dataEnd));
+    } else if (entry.compressionMethod === 8) {
+      const compressed = buffer.slice(entry.dataStart, entry.dataEnd);
+      try {
+        const decompressed = zlib.inflateRawSync(compressed);
+        fs.writeFileSync(targetPath, decompressed);
+      } catch (err) {
+        throw new Error(`Failed to decompress entry ${entry.name}: ${err.message}`);
+      }
+    } else {
+      throw new Error(`Unsupported compression method ${entry.compressionMethod} for ${entry.name}`);
+    }
+
+    const entryStat = fs.statSync(targetPath);
+    totalSize += entryStat.size;
+    fileCount++;
+
+    if (totalSize > MAX_TOTAL_SIZE) {
+      throw new Error(`Archive exceeds maximum total size of ${MAX_TOTAL_SIZE} bytes`);
+    }
+
+    if (fileCount > MAX_FILES) {
+      throw new Error(`Too many files: ${fileCount} (max ${MAX_FILES})`);
+    }
+
+    extracted.push({ name: entry.name, size: entryStat.size });
+  }
+
+  return { extracted, fileCount, totalSize };
 }
 
 function countFilesAndSize(dir) {
@@ -100,49 +206,6 @@ function countFilesAndSize(dir) {
 
   walk(dir);
   return { count, totalSize };
-}
-
-function extractZipViaWorker(zipPath, destDir) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(path.join(__dirname, "worker.js"), {
-      workerData: { zipPath, destDir },
-    });
-
-    let resolved = false;
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        worker.terminate();
-        reject(new Error("Build worker timed out"));
-      }
-    }, BUILD_TIMEOUT_MS);
-
-    worker.on("message", (msg) => {
-      if (msg.type === "ready") return;
-      clearTimeout(timeout);
-      resolved = true;
-      if (msg.success) {
-        resolve({ extracted: msg.extracted, fileCount: msg.fileCount, totalSize: msg.totalSize });
-      } else {
-        reject(new Error(msg.error || "Worker extraction failed"));
-      }
-    });
-
-    worker.on("error", (err) => {
-      clearTimeout(timeout);
-      if (!resolved) {
-        resolved = true;
-        reject(new Error(`Worker error: ${err.message}`));
-      }
-    });
-
-    worker.on("exit", (code) => {
-      if (!resolved && code !== 0) {
-        resolved = true;
-        reject(new Error(`Worker exited with code ${code}`));
-      }
-    });
-  });
 }
 
 // ---------- Middleware: Security headers ----------
@@ -275,14 +338,12 @@ app.post("/api/projects/:projectId/deployments", upload.single("zip"), async (re
     // Mark deployment as building
     updateDeployment(deployment.id, { status: "building", build_started_at: now() });
 
-    // Extract ZIP safely via isolated worker thread
+    // Extract ZIP safely
     try {
-      const { extracted, fileCount, totalSize: workerTotalSize } = await extractZipViaWorker(
+      const { extracted, fileCount, totalSize } = safeExtractZip(
         req.file.path,
         deployArtifactDir
       );
-
-      const { count, totalSize } = countFilesAndSize(deployArtifactDir);
 
       // Serve health check
       const indexPath = path.join(deployArtifactDir, "index.html");
@@ -292,7 +353,7 @@ app.post("/api/projects/:projectId/deployments", upload.single("zip"), async (re
         status: "ready",
         build_completed_at: now(),
         build_duration_ms: now() - deployment.created_at,
-        file_count: count,
+        file_count: fileCount,
         total_size: totalSize,
         url_path: `/deployments/${deployment.id}`,
         artifact_path: deployArtifactDir,
@@ -595,21 +656,25 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error", message: err.message });
 });
 
-const server = app.listen(PORT, HOST, () => {
-  console.log(`Local Deploy Platform running at http://${HOST}:${PORT}/`);
-  console.log(`Bound to ${HOST}:${PORT} (local-only)`);
-});
-
-process.on("SIGTERM", () => {
-  server.close(() => {
-    process.exit(0);
+// ---------- Start server after database initialization ----------
+initPromise.then(() => {
+  const server = app.listen(PORT, HOST, () => {
+    console.log(`Local Deploy Platform running at http://${HOST}:${PORT}/`);
+    console.log(`Bound to ${HOST}:${PORT} (local-only)`);
   });
-});
 
-process.on("SIGINT", () => {
-  server.close(() => {
-    process.exit(0);
+  process.on("SIGTERM", () => {
+    server.close(() => {
+      process.exit(0);
+    });
   });
-});
 
-module.exports = { app, server };
+  process.on("SIGINT", () => {
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+}).catch((err) => {
+  console.error("Failed to initialize database:", err);
+  process.exit(1);
+});

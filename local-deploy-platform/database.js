@@ -1,8 +1,10 @@
 "use strict";
 
-const Database = require("better-sqlite3");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
+
+const initSqlJs = require("sql.js");
 
 const DB_PATH = path.join(__dirname, "data", "platform.db");
 
@@ -14,9 +16,21 @@ function ensureDir(dirPath) {
 
 ensureDir(path.dirname(DB_PATH));
 
-const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+let db = null;
+let initialized = false;
+const initPromise = (async () => {
+  const SQLModule = await initSqlJs();
+  db = new SQLModule.Database();
+
+  // Load existing database if present
+  if (fs.existsSync(DB_PATH)) {
+    const fileContents = fs.readFileSync(DB_PATH);
+    db = new SQLModule.Database(fileContents);
+  }
+
+  initSchema();
+  initialized = true;
+})();
 
 function initSchema() {
   db.exec(`
@@ -81,39 +95,82 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_env_vars_project ON environment_variables(project_id);
     CREATE INDEX IF NOT EXISTS idx_domains_project ON domains(project_id);
   `);
+
+  saveDb();
 }
 
-initSchema();
+function saveDb() {
+  if (!db) return;
+  try {
+    const data = db.export();
+    fs.writeFileSync(DB_PATH, Buffer.from(data));
+  } catch (e) {
+    // Ignore save errors
+  }
+}
 
 function now() {
   return Date.now();
 }
 
 function generateId() {
-  return require("crypto").randomBytes(16).toString("hex");
+  return crypto.randomBytes(16).toString("hex");
 }
 
-// Project operations
+function run(sql, params = []) {
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  stmt.step();
+  stmt.free();
+}
+
+function get(sql, params = []) {
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  const hasRow = stmt.step();
+  if (!hasRow) {
+    stmt.free();
+    return undefined;
+  }
+  const row = stmt.getAsObject();
+  stmt.free();
+  return row;
+}
+
+function all(sql, params = []) {
+  const stmt = db.prepare(sql);
+  stmt.bind(params);
+  const rows = [];
+  while (stmt.step()) {
+    rows.push(stmt.getAsObject());
+  }
+  stmt.free();
+  return rows;
+}
+
+// ---- Project operations ----
+
 function createProject(name, description = "", framework = "static") {
   const id = generateId();
   const ts = now();
-  const stmt = db.prepare(
-    "INSERT INTO projects (id, name, description, framework, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+  run(
+    "INSERT INTO projects (id, name, description, framework, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, name, description, framework, ts, ts]
   );
-  stmt.run(id, name, description, framework, ts, ts);
+  saveDb();
   return getProjectById(id);
 }
 
 function getProjectById(id) {
-  return db.prepare("SELECT * FROM projects WHERE id = ?").get(id);
+  return get("SELECT * FROM projects WHERE id = ?", [id]);
 }
 
 function getProjectByName(name) {
-  return db.prepare("SELECT * FROM projects WHERE name = ?").get(name);
+  return get("SELECT * FROM projects WHERE name = ?", [name]);
 }
 
 function listProjects() {
-  return db.prepare("SELECT * FROM projects ORDER BY created_at DESC").all();
+  return all("SELECT * FROM projects ORDER BY created_at DESC");
 }
 
 function updateProject(id, updates) {
@@ -126,37 +183,38 @@ function updateProject(id, updates) {
   fields.push("updated_at = ?");
   values.push(now());
   values.push(id);
-  const stmt = db.prepare(
-    `UPDATE projects SET ${fields.join(", ")} WHERE id = ?`
-  );
-  stmt.run(...values);
+  run(`UPDATE projects SET ${fields.join(", ")} WHERE id = ?`, values);
+  saveDb();
   return getProjectById(id);
 }
 
 function deleteProject(id) {
-  const stmt = db.prepare("DELETE FROM projects WHERE id = ?");
-  return stmt.run(id);
+  run("DELETE FROM projects WHERE id = ?", [id]);
+  saveDb();
 }
 
-// Deployment operations
+// ---- Deployment operations ----
+
 function createDeployment(projectId, version, status = "pending") {
   const id = generateId();
   const ts = now();
-  const stmt = db.prepare(
-    "INSERT INTO deployments (id, project_id, version, status, created_at) VALUES (?, ?, ?, ?, ?)"
+  run(
+    "INSERT INTO deployments (id, project_id, version, status, created_at) VALUES (?, ?, ?, ?, ?)",
+    [id, projectId, version, status, ts]
   );
-  stmt.run(id, projectId, version, status, ts);
+  saveDb();
   return getDeploymentById(id);
 }
 
 function getDeploymentById(id) {
-  return db.prepare("SELECT * FROM deployments WHERE id = ?").get(id);
+  return get("SELECT * FROM deployments WHERE id = ?", [id]);
 }
 
 function listDeployments(projectId) {
-  return db
-    .prepare("SELECT * FROM deployments WHERE project_id = ? ORDER BY version DESC")
-    .all(projectId);
+  return all(
+    "SELECT * FROM deployments WHERE project_id = ? ORDER BY version DESC",
+    [projectId]
+  );
 }
 
 function updateDeployment(id, updates) {
@@ -167,110 +225,121 @@ function updateDeployment(id, updates) {
     values.push(val);
   }
   values.push(id);
-  const stmt = db.prepare(
-    `UPDATE deployments SET ${fields.join(", ")} WHERE id = ?`
-  );
-  stmt.run(...values);
+  run(`UPDATE deployments SET ${fields.join(", ")} WHERE id = ?`, values);
+  saveDb();
   return getDeploymentById(id);
 }
 
 function getNextVersion(projectId) {
-  const row = db
-    .prepare("SELECT MAX(version) as maxVersion FROM deployments WHERE project_id = ?")
-    .get(projectId);
-  return (row.maxVersion || 0) + 1;
+  const row = get(
+    "SELECT MAX(version) as maxVersion FROM deployments WHERE project_id = ?",
+    [projectId]
+  );
+  return (row && row.maxVersion !== null ? row.maxVersion : 0) + 1;
 }
 
-// Environment variable operations
+// ---- Environment variable operations ----
+
 function setEnvVar(projectId, key, value, type = "config", environment = "production") {
   const id = generateId();
   const ts = now();
-  const existing = db
-    .prepare(
-      "SELECT id FROM environment_variables WHERE project_id = ? AND key = ? AND environment = ?"
-    )
-    .get(projectId, key, environment);
+  const existing = get(
+    "SELECT id FROM environment_variables WHERE project_id = ? AND key = ? AND environment = ?",
+    [projectId, key, environment]
+  );
 
   if (existing) {
-    db.prepare(
-      "UPDATE environment_variables SET value = ?, type = ?, updated_at = ? WHERE id = ?"
-    ).run(value, type, ts, existing.id);
+    run(
+      "UPDATE environment_variables SET value = ?, type = ?, updated_at = ? WHERE id = ?",
+      [value, type, ts, existing.id]
+    );
+    saveDb();
     return getEnvVarById(existing.id);
   }
 
-  db.prepare(
-    "INSERT INTO environment_variables (id, project_id, key, value, type, environment, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-  ).run(id, projectId, key, value, type, environment, ts, ts);
+  run(
+    "INSERT INTO environment_variables (id, project_id, key, value, type, environment, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, projectId, key, value, type, environment, ts, ts]
+  );
+  saveDb();
   return getEnvVarById(id);
 }
 
 function getEnvVarById(id) {
-  return db.prepare("SELECT * FROM environment_variables WHERE id = ?").get(id);
+  return get("SELECT * FROM environment_variables WHERE id = ?", [id]);
 }
 
 function listEnvVars(projectId, environment) {
   if (environment) {
-    return db
-      .prepare(
-        "SELECT id, key, type, environment, created_at, updated_at FROM environment_variables WHERE project_id = ? AND environment = ? ORDER BY key"
-      )
-      .all(projectId, environment);
+    return all(
+      "SELECT id, key, type, environment, created_at, updated_at FROM environment_variables WHERE project_id = ? AND environment = ? ORDER BY key",
+      [projectId, environment]
+    );
   }
-  return db
-    .prepare(
-      "SELECT id, key, type, environment, created_at, updated_at FROM environment_variables WHERE project_id = ? ORDER BY key"
-    )
-    .all(projectId);
+  return all(
+    "SELECT id, key, type, environment, created_at, updated_at FROM environment_variables WHERE project_id = ? ORDER BY key",
+    [projectId]
+  );
 }
 
 function deleteEnvVar(id) {
-  return db.prepare("DELETE FROM environment_variables WHERE id = ?").run(id);
+  run("DELETE FROM environment_variables WHERE id = ?", [id]);
+  saveDb();
 }
 
-// Domain operations
+// ---- Domain operations ----
+
 function addDomain(projectId, name, environment = "production") {
   const id = generateId();
   const ts = now();
-  const stmt = db.prepare(
-    "INSERT INTO domains (id, project_id, name, environment, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)"
+  run(
+    "INSERT INTO domains (id, project_id, name, environment, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, projectId, name, environment, ts, ts]
   );
-  stmt.run(id, projectId, name, environment, ts, ts);
+  saveDb();
   return getDomainById(id);
 }
 
 function getDomainById(id) {
-  return db.prepare("SELECT * FROM domains WHERE id = ?").get(id);
+  return get("SELECT * FROM domains WHERE id = ?", [id]);
 }
 
 function listDomains(projectId) {
-  return db
-    .prepare("SELECT * FROM domains WHERE project_id = ? ORDER BY created_at DESC")
-    .all(projectId);
+  return all(
+    "SELECT * FROM domains WHERE project_id = ? ORDER BY created_at DESC",
+    [projectId]
+  );
 }
 
 function verifyDomain(id) {
   const ts = now();
-  db.prepare(
-    "UPDATE domains SET verified = 1, ssl_status = 'active', updated_at = ? WHERE id = ?"
-  ).run(ts, id);
+  run(
+    "UPDATE domains SET verified = 1, ssl_status = 'active', updated_at = ? WHERE id = ?",
+    [ts, id]
+  );
+  saveDb();
   return getDomainById(id);
 }
 
 function deleteDomain(id) {
-  return db.prepare("DELETE FROM domains WHERE id = ?").run(id);
+  run("DELETE FROM domains WHERE id = ?", [id]);
+  saveDb();
 }
 
 // Close on process exit
 process.on("exit", () => {
-  try {
-    db.close();
-  } catch (e) {
-    // ignore
+  if (db) {
+    try {
+      saveDb();
+      db.close();
+    } catch (e) {
+      // ignore
+    }
   }
 });
 
 module.exports = {
-  db,
+  initPromise,
   createProject,
   getProjectById,
   getProjectByName,
