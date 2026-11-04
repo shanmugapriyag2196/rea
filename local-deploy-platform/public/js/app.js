@@ -698,6 +698,8 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+});
+
   document.getElementById("deploy-project-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById("deploy-zip");
