@@ -1,6 +1,6 @@
-# Local Deploy Platform — Feature Specification
+# VG Deployment App — Feature Specification
 
-**Product:** Local Deploy Platform (working name)
+**Product:** VG Deployment App (working name)
 **Version:** 1.0.0 (initial)
 **Scope:** Local-only developer deployment platform
 **Reference:** Publicly observable Vercel features (vercel.com/docs)
@@ -266,7 +266,7 @@ Navigate between platform sections: Overview, Projects, Deployments, Build Logs,
 ---
 
 ## Design Principles (Independent)
-- Brand name: Local Deploy Platform (not Vercel)
+- Brand name: VG Deployment App (not Vercel)
 - Original color palette, typography, and component design
 - Original copy and documentation
 - No Vercel logos, trademarks, or protected assets

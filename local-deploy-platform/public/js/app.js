@@ -602,38 +602,28 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // New project button
-  document.getElementById("new-project-btn").addEventListener("click", () => {
-    navigateTo("projects");
-    openModal("create-project-modal");
+  // Projects - inline form
+  document.getElementById("show-create-project-form").addEventListener("click", () => {
+    document.getElementById("create-project-form-container").style.display = "block";
   });
 
-  document.getElementById("create-project-btn").addEventListener("click", () => {
-    navigateTo("projects");
-    openModal("create-project-modal");
+  document.getElementById("cancel-create-project-inline").addEventListener("click", () => {
+    document.getElementById("create-project-form-container").style.display = "none";
+    document.getElementById("create-project-inline-form").reset();
   });
 
-  document.getElementById("create-project-from-empty").addEventListener("click", () => {
-    openModal("create-project-modal");
-  });
-
-  document.getElementById("create-project-from-empty-2").addEventListener("click", () => {
-    openModal("create-project-modal");
-  });
-
-  // Create project form
-  document.getElementById("create-project-form").addEventListener("submit", (e) => {
+  document.getElementById("create-project-inline-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const formData = {
-      name: document.getElementById("project-name").value,
-      description: document.getElementById("project-description").value,
-      framework: document.getElementById("project-framework").value,
+      name: document.getElementById("project-name-inline").value,
+      description: document.getElementById("project-description-inline").value,
+      framework: document.getElementById("project-framework-inline").value,
     };
-    createProjectFromForm(formData);
+    createProjectFromForm(formData).then(() => {
+      document.getElementById("create-project-form-container").style.display = "none";
+      document.getElementById("create-project-inline-form").reset();
+    });
   });
-
-  document.getElementById("close-create-project").addEventListener("click", () => closeModal("create-project-modal"));
-  document.getElementById("cancel-create-project").addEventListener("click", () => closeModal("create-project-modal"));
 
   // Deployment filters
   document.getElementById("deployment-project-filter").addEventListener("change", loadDeployments);
@@ -657,22 +647,31 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("close-add-domain").addEventListener("click", () => closeModal("add-domain-modal"));
   document.getElementById("cancel-add-domain").addEventListener("click", () => closeModal("add-domain-modal"));
 
-  // Add env var form
-  document.getElementById("add-env-form").addEventListener("submit", (e) => {
+  // Environment variables - inline form
+  document.getElementById("show-add-env-btn").addEventListener("click", () => {
+    document.getElementById("add-env-form-container").style.display = "block";
+  });
+
+  document.getElementById("cancel-add-env-inline").addEventListener("click", () => {
+    document.getElementById("add-env-form-container").style.display = "none";
+    document.getElementById("add-env-inline-form").reset();
+  });
+
+  document.getElementById("add-env-inline-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const projectSelect = document.getElementById("env-project");
     const formData = {
       projectId: projectSelect.value,
-      key: document.getElementById("env-key").value,
-      value: document.getElementById("env-value").value,
-      type: document.getElementById("env-type").value,
+      key: document.getElementById("env-key-inline").value,
+      value: document.getElementById("env-value-inline").value,
+      type: document.getElementById("env-type-inline").value,
       environment: document.getElementById("env-environment").value,
     };
-    addEnvVarFromForm(formData);
+    addEnvVarFromForm(formData).then(() => {
+      document.getElementById("add-env-form-container").style.display = "none";
+      document.getElementById("add-env-inline-form").reset();
+    });
   });
-
-  document.getElementById("close-add-env").addEventListener("click", () => closeModal("add-env-modal"));
-  document.getElementById("cancel-add-env").addEventListener("click", () => closeModal("add-env-modal"));
 
   // Env project/environment change
   document.getElementById("env-project").addEventListener("change", loadEnvVars);
@@ -694,10 +693,26 @@ document.addEventListener("DOMContentLoaded", () => {
 window.viewDeployment = viewDeployment;
 window.rollbackDeployment = rollbackDeployment;
 window.deleteProject = deleteProject;
-window.viewProject = (id) => {
-  navigateTo("projects");
-  showToast("Project details coming soon", "info");
-};
+function viewProject(id) {
+  const project = projects.find(p => p.id === id);
+  if (!project) {
+    showToast("Project not found", "error");
+    return;
+  }
+  
+  // Show project detail view
+  document.getElementById("projects-list").style.display = "none";
+  document.getElementById("projects-empty").style.display = "none";
+  document.getElementById("project-detail").style.display = "block";
+  document.getElementById("create-project-form-container").style.display = "none";
+  document.getElementById("show-create-project-form").style.display = "none";
+  
+  document.getElementById("project-detail-name").textContent = project.name;
+  document.getElementById("project-detail-description").textContent = project.description || "No description";
+  
+  // Load project deployments
+  loadProjectDeployments(id);
+}
 window.deleteDomain = deleteDomain;
 window.verifyDomain = verifyDomain;
 window.deleteEnvVar = deleteEnvVar;

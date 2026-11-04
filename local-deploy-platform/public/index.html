@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Local Deploy Platform</title>
+  <title>VG Deployment App</title>
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">
-      <span class="brand-mark">LDP</span>
-      <span class="brand-name">Local Deploy Platform</span>
+      <img class="brand-logo" src="/images/Value-Global.png" alt="VG Deployment App logo">
+      <span class="brand-name">VG Deployment App</span>
     </div>
     <div class="topbar-actions">
       <button class="btn btn-primary" id="new-project-btn">New Project</button>
@@ -93,7 +93,38 @@
           <h1 class="section-title">Projects</h1>
           <p class="section-subtitle">Manage your projects</p>
         </div>
-        <button class="btn btn-primary" id="create-project-btn">Create Project</button>
+        <div class="projects-header">
+          <button class="btn btn-primary" id="show-create-project-form">New Project</button>
+        </div>
+        
+        <div class="card" id="create-project-form-container" style="display:none; margin-bottom: 1.5rem;">
+          <h3 style="margin-bottom: 1rem;">Create New Project</h3>
+          <form id="create-project-inline-form">
+            <div class="form-group">
+              <label for="project-name-inline">Project Name</label>
+              <input type="text" id="project-name-inline" name="name" placeholder="e.g. my-website" required>
+              <p class="field-hint">Letters, numbers, hyphens, and underscores only</p>
+            </div>
+            <div class="form-group">
+              <label for="project-description-inline">Description (optional)</label>
+              <input type="text" id="project-description-inline" name="description" placeholder="Describe your project">
+            </div>
+            <div class="form-group">
+              <label for="project-framework-inline">Framework</label>
+              <select id="project-framework-inline" name="framework">
+                <option value="static">Static HTML/CSS/JS</option>
+                <option value="vite">Vite</option>
+                <option value="react">React</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+              <button type="submit" class="btn btn-primary">Create Project</button>
+              <button type="button" class="btn btn-outline" id="cancel-create-project-inline">Cancel</button>
+            </div>
+          </form>
+        </div>
+        
         <div id="projects-list" class="table-wrap">
           <table class="data-table">
             <thead>
@@ -115,37 +146,41 @@
           <button class="btn btn-primary" id="create-project-from-empty-2">Create Project</button>
         </div>
 
-        <!-- Project creation modal -->
-        <div class="modal-overlay" id="create-project-modal">
-          <div class="modal">
-            <div class="modal-header">
-              <h3>Create Project</h3>
-              <button class="modal-close" id="close-create-project">&times;</button>
-            </div>
-            <form id="create-project-form">
+        <!-- Project detail view -->
+        <div id="project-detail" style="display:none;">
+          <div class="section-header">
+            <button class="btn btn-outline" id="back-to-projects" style="margin-bottom: 1rem;">← Back to Projects</button>
+            <h1 class="section-title" id="project-detail-name"></h1>
+            <p class="section-subtitle" id="project-detail-description"></p>
+          </div>
+          
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <h3 style="margin-bottom: 1rem;">Deploy New Version</h3>
+            <form id="deploy-project-form" enctype="multipart/form-data">
               <div class="form-group">
-                <label for="project-name">Project Name</label>
-                <input type="text" id="project-name" name="name" placeholder="e.g. my-website" required>
-                <p class="field-hint">Letters, numbers, hyphens, and underscores only</p>
+                <label for="deploy-zip">Upload ZIP File</label>
+                <input type="file" id="deploy-zip" name="zip" accept=".zip" required>
+                <p class="field-hint">Upload a ZIP containing your static website files</p>
               </div>
-              <div class="form-group">
-                <label for="project-description">Description (optional)</label>
-                <input type="text" id="project-description" name="description" placeholder="Describe your project">
-              </div>
-              <div class="form-group">
-                <label for="project-framework">Framework</label>
-                <select id="project-framework" name="framework">
-                  <option value="static">Static HTML/CSS/JS</option>
-                  <option value="vite">Vite</option>
-                  <option value="react">React</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-              <div class="modal-actions">
-                <button type="button" class="btn btn-outline" id="cancel-create-project">Cancel</button>
-                <button type="submit" class="btn btn-primary">Create Project</button>
-              </div>
+              <button type="submit" class="btn btn-primary">Deploy</button>
             </form>
+          </div>
+          
+          <h2 class="subsection-title">Deployments</h2>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Version</th>
+                  <th>Status</th>
+                  <th>Duration</th>
+                  <th>Files</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="project-deployments-table-body"></tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -274,6 +309,9 @@
           <h1 class="section-title">Environment Variables</h1>
           <p class="section-subtitle">Configure project environment variables</p>
         </div>
+        <div class="env-header" style="margin-bottom: 1.5rem;">
+          <button class="btn btn-primary" id="show-add-env-btn">New Environment Variable</button>
+        </div>
         <div class="env-project-selector">
           <label for="env-project">Project</label>
           <select id="env-project"></select>
@@ -283,6 +321,33 @@
             <option value="development">Development</option>
           </select>
         </div>
+        
+        <div class="card" id="add-env-form-container" style="display:none; margin-bottom: 1.5rem;">
+          <h3 style="margin-bottom: 1rem;">Add Environment Variable</h3>
+          <form id="add-env-inline-form">
+            <div class="form-group">
+              <label for="env-key-inline">Key</label>
+              <input type="text" id="env-key-inline" name="key" placeholder="API_URL" required>
+            </div>
+            <div class="form-group">
+              <label for="env-value-inline">Value</label>
+              <input type="text" id="env-value-inline" name="value" placeholder="Enter value" required>
+            </div>
+            <div class="form-group">
+              <label for="env-type-inline">Type</label>
+              <select id="env-type-inline" name="type">
+                <option value="config">Config (readable)</option>
+                <option value="secret">Secret (write-only)</option>
+              </select>
+              <p class="field-hint">Secret values cannot be viewed after saving.</p>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+              <button type="submit" class="btn btn-primary">Save Variable</button>
+              <button type="button" class="btn btn-outline" id="cancel-add-env-inline">Cancel</button>
+            </div>
+          </form>
+        </div>
+        
         <div id="env-table-wrap" class="table-wrap">
           <table class="data-table">
             <thead>
@@ -301,38 +366,6 @@
           <div class="empty-icon">&#128272;</div>
           <h2>No environment variables</h2>
           <p>Add environment variables for your project.</p>
-        </div>
-
-        <!-- Add env var modal -->
-        <div class="modal-overlay" id="add-env-modal">
-          <div class="modal">
-            <div class="modal-header">
-              <h3>Add Environment Variable</h3>
-              <button class="modal-close" id="close-add-env">&times;</button>
-            </div>
-            <form id="add-env-form">
-              <div class="form-group">
-                <label for="env-key">Key</label>
-                <input type="text" id="env-key" name="key" placeholder="API_URL" required>
-              </div>
-              <div class="form-group">
-                <label for="env-value">Value</label>
-                <input type="text" id="env-value" name="value" placeholder="Enter value" required>
-              </div>
-              <div class="form-group">
-                <label for="env-type">Type</label>
-                <select id="env-type" name="type">
-                  <option value="config">Config (readable)</option>
-                  <option value="secret">Secret (write-only)</option>
-                </select>
-                <p class="field-hint">Secret values cannot be viewed after saving.</p>
-              </div>
-              <div class="modal-actions">
-                <button type="button" class="btn btn-outline" id="cancel-add-env">Cancel</button>
-                <button type="submit" class="btn btn-primary">Save Variable</button>
-              </div>
-            </form>
-          </div>
         </div>
       </section>
 
@@ -356,7 +389,7 @@
         </div>
         <div class="card settings-card">
           <h3>About</h3>
-          <p>Local Deploy Platform v1.0.0</p>
+          <p>VG Deployment App v1.0.0</p>
           <p>An original developer deployment platform.</p>
           <p>Local-only. Not affiliated with any external service.</p>
         </div>

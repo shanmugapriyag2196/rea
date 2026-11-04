@@ -1,7 +1,7 @@
 {
-  "name": "local-deploy-platform",
+  "name": "vg-deployment-app",
   "version": "1.0.0",
-  "description": "Local-only developer deployment platform for static websites",
+  "description": "Local-only deployment platform for static websites",
   "private": true,
   "main": "server.js",
   "scripts": {

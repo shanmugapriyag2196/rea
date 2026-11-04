@@ -267,9 +267,9 @@ app.post("/api/projects", (req, res) => {
   }
 });
 
-app.get("/api/projects/:id", (req, res) => {
+app.get("/api/projects/:projectId", (req, res) => {
   try {
-    const project = getProjectById(req.params.id);
+    const project = getProjectById(req.params.projectId);
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -279,9 +279,9 @@ app.get("/api/projects/:id", (req, res) => {
   }
 });
 
-app.put("/api/projects/:id", (req, res) => {
+app.put("/api/projects/:projectId", (req, res) => {
   try {
-    const project = getProjectById(req.params.id);
+    const project = getProjectById(req.params.projectId);
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
     }
@@ -295,21 +295,21 @@ app.put("/api/projects/:id", (req, res) => {
     if (output_directory !== undefined) updates.output_directory = output_directory;
     if (root_directory !== undefined) updates.root_directory = root_directory;
 
-    const updated = updateProject(req.params.id, updates);
+    const updated = updateProject(req.params.projectId, updates);
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: "Failed to update project", message: err.message });
   }
 });
 
-app.delete("/api/projects/:id", (req, res) => {
+app.delete("/api/projects/:projectId", (req, res) => {
   try {
-    const project = getProjectById(req.params.id);
+    const project = getProjectById(req.params.projectId);
     if (!project) {
       return res.status(404).json({ error: "Project not found" });
     }
 
-    deleteProject(req.params.id);
+    deleteProject(req.params.projectId);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: "Failed to delete project", message: err.message });
@@ -388,22 +388,37 @@ app.post("/api/projects/:projectId/deployments", upload.single("zip"), async (re
   }
 });
 
-app.get("/api/projects/:projectId/deployments", (req, res) => {
+app.get("/api/deployments", (req, res) => {
   try {
-    const project = getProjectById(req.params.projectId);
-    if (!project) {
-      return res.status(404).json({ error: "Project not found" });
+    const { projectId } = req.query;
+    if (projectId) {
+      const project = getProjectById(projectId);
+      if (!project) {
+        return res.status(404).json({ error: "Project not found" });
+      }
+      const deployments = listDeployments(projectId);
+      return res.json(deployments);
     }
-    const deployments = listDeployments(req.params.projectId);
-    res.json(deployments);
+    // If no projectId, return all deployments
+    const allProjects = listProjects();
+    const allDeployments = [];
+    for (const project of allProjects) {
+      const deps = listDeployments(project.id);
+      deps.forEach((d) => {
+        d.projectName = project.name;
+        allDeployments.push(d);
+      });
+    }
+    allDeployments.sort((a, b) => b.created_at - a.created_at);
+    res.json(allDeployments);
   } catch (err) {
     res.status(500).json({ error: "Failed to list deployments", message: err.message });
   }
 });
 
-app.get("/api/deployments/:id", (req, res) => {
+app.get("/api/deployments/:deploymentId", (req, res) => {
   try {
-    const deployment = getDeploymentById(req.params.id);
+    const deployment = getDeploymentById(req.params.deploymentId);
     if (!deployment) {
       return res.status(404).json({ error: "Deployment not found" });
     }
@@ -413,9 +428,9 @@ app.get("/api/deployments/:id", (req, res) => {
   }
 });
 
-app.post("/api/deployments/:id/rollback", (req, res) => {
+app.post("/api/deployments/:deploymentId/rollback", (req, res) => {
   try {
-    const deployment = getDeploymentById(req.params.id);
+    const deployment = getDeploymentById(req.params.deploymentId);
     if (!deployment) {
       return res.status(404).json({ error: "Deployment not found" });
     }
@@ -428,7 +443,6 @@ app.post("/api/deployments/:id/rollback", (req, res) => {
     const projectDeployments = listDeployments(deployment.project_id);
 
     // Rollback: update all deployments to non-production, mark selected as production
-    // We use a simple approach: mark the selected deployment as the active one
     for (const d of projectDeployments) {
       updateDeployment(d.id, { status: d.id === deployment.id ? "ready" : d.status });
     }
@@ -444,9 +458,9 @@ app.post("/api/deployments/:id/rollback", (req, res) => {
   }
 });
 
-app.get("/api/deployments/:id/logs", (req, res) => {
+app.get("/api/deployments/:deploymentId/logs", (req, res) => {
   try {
-    const deployment = getDeploymentById(req.params.id);
+    const deployment = getDeploymentById(req.params.deploymentId);
     if (!deployment) {
       return res.status(404).json({ error: "Deployment not found" });
     }
@@ -659,7 +673,7 @@ app.use((err, req, res, next) => {
 // ---------- Start server after database initialization ----------
 initPromise.then(() => {
   const server = app.listen(PORT, HOST, () => {
-    console.log(`Local Deploy Platform running at http://${HOST}:${PORT}/`);
+    console.log(`VG Deployment App running at http://${HOST}:${PORT}/`);
     console.log(`Bound to ${HOST}:${PORT} (local-only)`);
   });
 
