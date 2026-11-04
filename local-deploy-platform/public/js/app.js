@@ -602,38 +602,96 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Import Git form
-  document.getElementById("show-import-git-form").addEventListener("click", () => {
-    document.getElementById("import-git-form-container").style.display = "block";
-    document.getElementById("create-project-form-container").style.display = "none";
-  });
+  // New Project buttons (header + projects section)
+  const newProjectBtn = document.getElementById("new-project-btn");
+  const showCreateProjectForm = document.getElementById("show-create-project-form");
+  const createProjectFormContainer = document.getElementById("create-project-form-container");
+  const importGitFormContainer = document.getElementById("import-git-form-container");
 
-  document.getElementById("cancel-import-git").addEventListener("click", () => {
-    document.getElementById("import-git-form-container").style.display = "none";
-    document.getElementById("import-git-form").reset();
-  });
+  function showCreateProjectFormUI() {
+    if (createProjectFormContainer) createProjectFormContainer.style.display = "block";
+    if (importGitFormContainer) importGitFormContainer.style.display = "none";
+  }
+
+  if (newProjectBtn) newProjectBtn.addEventListener("click", showCreateProjectFormUI);
+  if (showCreateProjectForm) showCreateProjectForm.addEventListener("click", showCreateProjectFormUI);
+
+  // Create project form
+  const createProjectInlineForm = document.getElementById("create-project-inline-form");
+  if (createProjectInlineForm) {
+    createProjectInlineForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const formData = {
+        name: document.getElementById("project-name-inline").value,
+        description: document.getElementById("project-description-inline").value,
+        framework: document.getElementById("project-framework-inline").value,
+      };
+      try {
+        showToast("Creating project...", "info");
+        const project = await api("/projects", {
+          method: "POST",
+          body: JSON.stringify(formData),
+        });
+        if (createProjectFormContainer) createProjectFormContainer.style.display = "none";
+        createProjectInlineForm.reset();
+        showToast(`Project "${project.name}" created`, "success");
+        loadProjects();
+        loadOverview();
+        populateProjectSelects();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    });
+  }
+
+  // Cancel create project
+  const cancelCreateProjectInline = document.getElementById("cancel-create-project-inline");
+  if (cancelCreateProjectInline && createProjectFormContainer) {
+    cancelCreateProjectInline.addEventListener("click", () => {
+      createProjectFormContainer.style.display = "none";
+      createProjectInlineForm.reset();
+    });
+  }
+
+  // Import Git form
+  const showImportGitForm = document.getElementById("show-import-git-form");
+  if (showImportGitForm) {
+    showImportGitForm.addEventListener("click", () => {
+      if (importGitFormContainer) importGitFormContainer.style.display = "block";
+      if (createProjectFormContainer) createProjectFormContainer.style.display = "none";
+    });
+  }
+
+  const cancelImportGit = document.getElementById("cancel-import-git");
+  if (cancelImportGit && importGitFormContainer) {
+    cancelImportGit.addEventListener("click", () => {
+      importGitFormContainer.style.display = "none";
+      document.getElementById("import-git-form").reset();
+    });
+  }
 
   document.getElementById("import-git-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const repoUrl = document.getElementById("git-repo-url").value;
     const projectName = document.getElementById("git-project-name").value;
-    
+
     if (!repoUrl || !projectName) {
       showToast("Please fill in all required fields", "error");
       return;
     }
-    
+
     try {
       showToast("Importing repository...", "info");
       const result = await api("/projects/import-git", {
         method: "POST",
         body: JSON.stringify({ repoUrl, projectName }),
       });
-      document.getElementById("import-git-form-container").style.display = "none";
+      importGitFormContainer.style.display = "none";
       document.getElementById("import-git-form").reset();
       showToast(`Repository imported as "${result.project.name}"`, "success");
       loadProjects();
       loadOverview();
+      populateProjectSelects();
     } catch (err) {
       showToast(err.message, "error");
     }
@@ -691,15 +749,7 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("env-project").addEventListener("change", loadEnvVars);
   document.getElementById("env-environment").addEventListener("change", loadEnvVars);
 
-  // Modal close on overlay click
-  document.querySelectorAll(".modal-overlay").forEach((overlay) => {
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.classList.remove("open");
-    });
-  });
-
-});
-
+  // Deploy project form (in project detail view)
   document.getElementById("deploy-project-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const fileInput = document.getElementById("deploy-zip");
@@ -730,10 +780,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // Modal close on overlay click
+  document.querySelectorAll(".modal-overlay").forEach((overlay) => {
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) overlay.classList.remove("open");
+    });
+  });
+
+  // Initial load
+  loadOverview();
+  populateProjectSelects();
+});
+
 // ---------- Global functions (used by inline onclick) ----------
-window.viewDeployment = viewDeployment;
-window.rollbackDeployment = rollbackDeployment;
-window.deleteProject = deleteProject;
 function loadProjectDeployments(projectId) {
   const tbody = document.getElementById("project-deployments-table-body");
   if (!tbody) {
@@ -773,13 +832,14 @@ function loadProjectDeploymentsInto(tbody, projectId) {
       tbody.innerHTML = `<tr><td colspan="6" style="color:red">Error: ${escapeHtml(e.message)}</td></tr>`;
     });
 }
+
 function viewProject(id) {
   const project = projects.find(p => p.id === id);
   if (!project) {
     showToast("Project not found", "error");
     return;
   }
-  
+
   currentProjectId = id;
   document.getElementById("projects-list").style.display = "none";
   document.getElementById("projects-empty").style.display = "none";
@@ -788,13 +848,13 @@ function viewProject(id) {
   document.getElementById("import-git-form-container").style.display = "none";
   document.getElementById("show-create-project-form").style.display = "none";
   document.getElementById("show-import-git-form").style.display = "none";
-  
+
   document.getElementById("project-detail-name").textContent = project.name;
   document.getElementById("project-detail-description").textContent = project.description || "No description";
-  
+
   loadProjectDeployments(id);
 }
-// ---------- Global functions (used by inline onclick) ----------
+
 window.viewDeployment = viewDeployment;
 window.rollbackDeployment = rollbackDeployment;
 window.deleteProject = deleteProject;
