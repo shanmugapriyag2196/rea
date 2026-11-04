@@ -8,7 +8,7 @@ const PORT = window.location.port;
 let currentSection = "overview";
 let projects = [];
 let deployments = [];
-let selectedProjectId = null;
+let currentProjectId = null;
 
 // ---------- DOM Elements ----------
 const sections = document.querySelectorAll(".section");
@@ -698,51 +698,87 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  // Initial load
-  loadOverview();
-  populateProjectSelects();
-});
+  document.getElementById("deploy-project-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fileInput = document.getElementById("deploy-zip");
+    const file = fileInput.files[0];
+    if (!file) {
+      showToast("Please select a ZIP file", "error");
+      return;
+    }
+    const formData = new FormData();
+    formData.append("zip", file);
+    try {
+      showToast("Deploying...", "info");
+      const res = await fetch(`${API_BASE}/projects/${currentProjectId}/deployments`, {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Deployment failed");
+      }
+      showToast("Deployment created", "success");
+      fileInput.value = "";
+      loadProjectDeployments(currentProjectId);
+      loadProjects();
+      loadOverview();
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
 
 // ---------- Global functions (used by inline onclick) ----------
 window.viewDeployment = viewDeployment;
 window.rollbackDeployment = rollbackDeployment;
 window.deleteProject = deleteProject;
 function loadProjectDeployments(projectId) {
-  const tbody = document.getElementById("project-deployments-tbody");
-  if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+  const tbody = document.getElementById("project-deployments-table-body");
+  if (!tbody) {
+    const alt = document.getElementById("project-deployments-tbody");
+    if (!alt) return;
+    return loadProjectDeploymentsInto(alt, projectId);
+  }
+  loadProjectDeploymentsInto(tbody, projectId);
+}
+
+function loadProjectDeploymentsInto(tbody, projectId) {
+  tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
   api(`/projects/${projectId}/deployments`)
     .then((data) => {
       if (!data.deployments || data.deployments.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5">No deployments yet</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6">No deployments yet</td></tr>';
         return;
       }
       tbody.innerHTML = "";
       for (const d of data.deployments) {
         const tr = document.createElement("tr");
         tr.innerHTML = `
-          <td>${d.id.slice(0, 8)}...</td>
+          <td>${d.version || "-"}</td>
           <td>${escapeHtml(d.status)}</td>
+          <td>${d.build_duration_ms ? formatDuration(d.build_duration_ms) : "-"}</td>
+          <td>${d.file_count || 0}</td>
           <td>${d.created_at ? formatDate(d.created_at) : "-"}</td>
-          <td>${escapeHtml(d.commit_sha ? d.commit_sha.slice(0, 7) : "-")}</td>
           <td>
             <button class="btn btn-sm" onclick="viewDeployment('${d.id}')">View</button>
-            ${d.status === "success" ? `<button class="btn btn-sm" onclick="rollbackDeployment('${d.id}')">Rollback</button>` : ""}
+            ${d.status === "ready" ? `<button class="btn btn-sm" onclick="rollbackDeployment('${d.id}')">Rollback</button>` : ""}
           </td>
         `;
         tbody.appendChild(tr);
       }
     })
     .catch((e) => {
-      tbody.innerHTML = `<tr><td colspan="5" style="color:red">Error: ${escapeHtml(e.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="color:red">Error: ${escapeHtml(e.message)}</td></tr>`;
     });
 }
+function viewProject(id) {
   const project = projects.find(p => p.id === id);
   if (!project) {
     showToast("Project not found", "error");
     return;
   }
   
+  currentProjectId = id;
   document.getElementById("projects-list").style.display = "none";
   document.getElementById("projects-empty").style.display = "none";
   document.getElementById("project-detail").style.display = "block";
