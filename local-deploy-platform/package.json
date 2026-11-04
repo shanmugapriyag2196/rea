@@ -1,0 +1,22 @@
+{
+  "name": "local-deploy-platform",
+  "version": "1.0.0",
+  "description": "Local-only developer deployment platform for static websites",
+  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tests/run.js",
+    "lint": "node -e \"console.log('Lint placeholder')\""
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^10.0.0"
+  }
+}
