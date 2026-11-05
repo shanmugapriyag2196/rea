@@ -1,6 +1,7 @@
 "use strict";
 
 const express = require("express");
+const { spawn, execSync } = require("child_process");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -838,9 +839,9 @@ app.post("/api/projects/import-git", async (req, res) => {
     fs.mkdirSync(projectWorkspace, { recursive: true });
 
     const repoDir = path.join(projectWorkspace, "repo");
-    const gitClone = spawn("git", ["clone", "--depth", "1", repoUrl, repoDir], { cwd: projectWorkspace });
+    const gitClone = spawn("git", ["clone", repoUrl, repoDir], { cwd: projectWorkspace });
 
-    gitClone.on("close", (code) => {
+    gitClone.on("close", async (code) => {
       if (code !== 0) {
         deleteProject(project.id);
         return res.status(500).json({
@@ -849,10 +850,55 @@ app.post("/api/projects/import-git", async (req, res) => {
         });
       }
 
+      // Fetch all commits from the local cloned repo (like Vercel shows all commits)
+      let commits = [];
+      try {
+        const logOutput = execSync("git log --pretty=format:%H%x09%s%x09%an%x09%ae%x09%ad --date=iso", {
+          cwd: repoDir,
+          encoding: "utf8",
+          maxBuffer: 10 * 1024 * 1024,
+        });
+
+        const lines = logOutput.trim().split("\n").filter((l) => l.length > 0);
+        commits = lines.map((line) => {
+          const parts = line.split("\t");
+          return {
+            sha: parts[0],
+            message: parts[1] || "",
+            authorName: parts[2] || "",
+            authorEmail: parts[3] || "",
+            authorDate: parts[4] || "",
+            url: "",
+            htmlUrl: `${repoUrl}/commit/${parts[0]}`,
+          };
+        });
+
+        // Store commits in database
+        for (const c of commits) {
+          upsertCommit(
+            project.id,
+            c.sha,
+            c.message,
+            c.authorName,
+            c.authorEmail,
+            c.authorDate,
+            c.url,
+            c.htmlUrl
+          );
+        }
+
+        // Mark project as GitHub-connected
+        setProjectGitHub(project.id, repoUrl, "", "main");
+      } catch (gitErr) {
+        console.error("Failed to fetch git log:", gitErr.message);
+      }
+
       res.status(201).json({
         project,
         message: "Repository imported successfully",
         path: repoDir,
+        commits,
+        commitCount: commits.length,
       });
     });
 

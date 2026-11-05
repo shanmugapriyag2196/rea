@@ -688,10 +688,11 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       importGitFormContainer.style.display = "none";
       document.getElementById("import-git-form").reset();
-      showToast(`Repository imported as "${result.project.name}"`, "success");
+      showToast(`Repository imported as "${result.project.name}" (${result.commitCount || 0} commits)`, "success");
       loadProjects();
       loadOverview();
       populateProjectSelects();
+      setTimeout(() => viewProject(result.project.id), 500);
     } catch (err) {
       showToast(err.message, "error");
     }
