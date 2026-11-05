@@ -631,12 +631,85 @@ function populateProjectSelects() {
 
 // ---------- Event Listeners ----------
 document.addEventListener("DOMContentLoaded", () => {
-  // Navigation
-  navLinks.forEach((link) => {
-    link.addEventListener("click", (e) => {
-      e.preventDefault();
-      navigateTo(link.dataset.section);
-    });
+  // Vercel-style GitHub import modal
+  document.getElementById("show-import-git-modal").addEventListener("click", () => {
+    document.getElementById("github-import-modal").classList.add("open");
+  });
+  document.getElementById("close-github-import").addEventListener("click", () => {
+    document.getElementById("github-import-modal").classList.remove("open");
+  });
+
+  let selectedRepo = null;
+  document.getElementById("load-github-repos").addEventListener("click", async () => {
+    const token = document.getElementById("github-token-input").value;
+    if (!token) {
+      showToast("Enter GitHub token", "error");
+      return;
+    }
+    localStorage.setItem("github_token", token);
+    document.getElementById("github-repos-list").style.display = "block";
+    document.getElementById("github-repos-loading").style.display = "block";
+    document.getElementById("github-repos-items").style.display = "none";
+    try {
+      const res = await fetch(`${API_BASE}/github/repos`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      document.getElementById("github-repos-loading").style.display = "none";
+      document.getElementById("github-repos-items").style.display = "block";
+      document.getElementById("github-repos-items").innerHTML = (data.repos || [])
+        .map(
+          (r) => `
+          <div style="padding: 0.75rem; border-bottom: 1px solid #f1f5f9; cursor: pointer;" onclick="selectGitRepo('${r.full_name}', '${r.default_branch}')">
+            <div style="font-weight: 500;">${escapeHtml(r.full_name)}</div>
+            <div style="font-size: 0.875rem; color: #64748b;">${escapeHtml(r.description || "")}</div>
+          </div>
+        `
+        )
+        .join("");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
+  window.selectGitRepo = async (fullName, defaultBranch) => {
+    selectedRepo = { fullName, defaultBranch };
+    document.getElementById("import-repo-name").value = fullName.split("/")[1];
+    document.getElementById("github-import-details").style.display = "block";
+    const token = localStorage.getItem("github_token") || document.getElementById("github-token-input").value;
+    const [owner, repo] = fullName.split("/");
+    try {
+      const res = await fetch(`${API_BASE}/github/branches?owner=${owner}&repo=${repo}&token=${token}`);
+      const data = await res.json();
+      document.getElementById("import-branch").innerHTML = (data.branches || [])
+        .map((b) => `<option value="${b.name}" ${b.name === defaultBranch ? "selected" : ""}>${b.name}</option>`)
+        .join("");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
+
+  document.getElementById("do-import-git").addEventListener("click", async () => {
+    const token = localStorage.getItem("github_token") || document.getElementById("github-token-input").value;
+    if (!selectedRepo) {
+      showToast("Select a repo", "error");
+      return;
+    }
+    const projectName = document.getElementById("import-repo-name").value;
+    const branch = document.getElementById("import-branch").value;
+    try {
+      showToast("Importing...", "info");
+      const result = await api("/projects/import-git", {
+        method: "POST",
+        body: JSON.stringify({ repoUrl: `https://github.com/${selectedRepo.fullName}.git`, projectName }),
+      });
+      document.getElementById("github-import-modal").classList.remove("open");
+      showToast(`Imported ${projectName} (${result.commitCount || 0} commits)`, "success");
+      loadProjects();
+      setTimeout(() => viewProject(result.project.id), 500);
+    } catch (err) {
+      showToast(err.message, "error");
+    }
   });
 
   // New Project buttons (header + projects section)
@@ -757,8 +830,50 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("close-add-domain").addEventListener("click", () => closeModal("add-domain-modal"));
   document.getElementById("cancel-add-domain").addEventListener("click", () => closeModal("add-domain-modal"));
 
-  // Environment variables - inline form
-  document.getElementById("show-add-env-btn").addEventListener("click", () => {
+  // Tabs in project detail
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tab-btn").forEach((b) => (b.style.borderBottom = "none"));
+      document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = "none"));
+      btn.style.borderBottom = "2px solid #000";
+      btn.style.marginBottom = "-2px";
+      document.getElementById(`tab-${btn.dataset.tab}`).style.display = "block";
+      if (btn.dataset.tab === "commits" && currentProjectId) {
+        loadProjectDetailCommits(currentProjectId);
+      }
+    });
+  });
+
+  window.loadProjectDetailCommits = async (projectId) => {
+    const tbody = document.getElementById("project-detail-commits-body");
+    const empty = document.getElementById("project-detail-commits-empty");
+    try {
+      const data = await api(`/projects/${projectId}/github/commits?limit=100`);
+      if (!data.commits || data.commits.length === 0) {
+        if (empty) empty.style.display = "block";
+        if (tbody) tbody.innerHTML = "";
+        return;
+      }
+      if (empty) empty.style.display = "none";
+      if (tbody) {
+        tbody.innerHTML = data.commits
+          .map(
+            (c) => `
+            <tr>
+              <td><code>${c.sha.slice(0, 7)}</code></td>
+              <td>${escapeHtml(c.message.split("\n")[0])}</td>
+              <td>${escapeHtml(c.authorName)}</td>
+              <td>${c.authorDate ? new Date(c.authorDate).toLocaleDateString() : "-"}</td>
+              <td><a href="${c.htmlUrl || '#'}" target="_blank" class="btn btn-outline btn-sm">View</a></td>
+            </tr>
+          `
+          )
+          .join("");
+      }
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  };
     document.getElementById("add-env-form-container").style.display = "block";
   });
 
@@ -1009,8 +1124,19 @@ function viewProject(id) {
 
   document.getElementById("project-detail-name").textContent = project.name;
   document.getElementById("project-detail-description").textContent = project.description || "No description";
+  document.getElementById("project-settings-git").textContent = project.github_repo_url || "Not connected";
+
+  // Reset tabs
+  document.querySelectorAll(".tab-btn").forEach((b, i) => {
+    b.style.borderBottom = i === 0 ? "2px solid #000" : "none";
+    b.style.marginBottom = i === 0 ? "-2px" : "0";
+  });
+  document.querySelectorAll(".tab-content").forEach((tc, i) => {
+    tc.style.display = i === 0 ? "block" : "none";
+  });
 
   loadProjectDeployments(id);
+  loadProjectDetailCommits(id);
 }
 
 window.viewDeployment = viewDeployment;

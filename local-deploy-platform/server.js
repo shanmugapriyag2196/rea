@@ -743,6 +743,53 @@ app.get("/api/projects/:projectId/github/commits", (req, res) => {
   }
 });
 
+app.get("/api/github/repos", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "") || req.query.token;
+    if (!token) {
+      return res.status(401).json({ error: "GitHub token required" });
+    }
+    const response = await fetch("https://api.github.com/user/repos?per_page=100&sort=updated", {
+      headers: {
+        Authorization: `token ${token}`,
+        "User-Agent": "VG-Deploy-Platform",
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+    const repos = await response.json();
+    res.json({ repos });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch repos", message: err.message });
+  }
+});
+
+app.get("/api/github/branches", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "") || req.query.token;
+    const { owner, repo } = req.query;
+    if (!token || !owner || !repo) {
+      return res.status(400).json({ error: "Token, owner, repo required" });
+    }
+    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/branches?per_page=100`, {
+      headers: {
+        Authorization: `token ${token}`,
+        "User-Agent": "VG-Deploy-Platform",
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`GitHub API error: ${response.status}`);
+    }
+    const branches = await response.json();
+    res.json({ branches });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch branches", message: err.message });
+  }
+});
+
 app.get("/api/commits", (req, res) => {
   try {
     const { limit = 100 } = req.query;
