@@ -37,6 +37,7 @@ function navigateTo(sectionId) {
 
   // Section-specific initialization
   if (sectionId === "projects") loadProjects();
+  if (sectionId === "commits") loadAllCommitsPage();
   if (sectionId === "deployments") loadDeployments();
   if (sectionId === "build-logs") loadBuildLogDeployments();
   if (sectionId === "domains") loadDomains();
@@ -140,6 +141,42 @@ async function loadOverview() {
     }
   } catch (err) {
     showToast("Failed to load overview: " + err.message, "error");
+  }
+}
+
+// ---------- Commits (all) ----------
+async function loadAllCommitsPage() {
+  const tbody = document.getElementById("commits-page-body");
+  const empty = document.getElementById("commits-page-empty");
+  const wrap = document.getElementById("commits-page-wrap");
+  if (!tbody) return;
+  try {
+    const data = await api("/commits?limit=200");
+    if (!data.commits || data.commits.length === 0) {
+      if (wrap) wrap.style.display = "none";
+      if (empty) empty.style.display = "flex";
+      return;
+    }
+    if (empty) empty.style.display = "none";
+    if (wrap) wrap.style.display = "block";
+    tbody.innerHTML = data.commits
+      .map(
+        (c) => `
+        <tr>
+          <td>${escapeHtml(c.project_name || "-")}</td>
+          <td><code>${c.sha.slice(0, 7)}</code></td>
+          <td>${escapeHtml(c.message)}</td>
+          <td>${escapeHtml(c.authorName)}</td>
+          <td>${c.authorDate ? new Date(c.authorDate).toLocaleString() : "-"}</td>
+          <td>
+            ${c.htmlUrl ? `<a href="${c.htmlUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">View</a>` : "-"}
+          </td>
+        </tr>
+      `
+      )
+      .join("");
+  } catch (err) {
+    showToast("Failed to load commits: " + err.message, "error");
   }
 }
 

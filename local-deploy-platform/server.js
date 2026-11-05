@@ -31,6 +31,7 @@ const {
   setProjectGitHub,
   upsertCommit,
   listCommits,
+  listAllCommits,
   deleteCommits,
   now,
   generateId,
@@ -739,6 +740,16 @@ app.get("/api/projects/:projectId/github/commits", (req, res) => {
     res.json({ commits });
   } catch (err) {
     res.status(500).json({ error: "Failed to list commits", message: err.message });
+  }
+});
+
+app.get("/api/commits", (req, res) => {
+  try {
+    const { limit = 100 } = req.query;
+    const commits = listAllCommits(parseInt(limit, 10));
+    res.json({ commits });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list all commits", message: err.message });
   }
 });
 

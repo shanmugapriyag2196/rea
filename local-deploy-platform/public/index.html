@@ -22,7 +22,8 @@
       <ul class="nav-list">
         <li><a href="#" class="nav-link active" data-section="overview"><span class="nav-icon">&#9733;</span> Overview</a></li>
         <li><a href="#" class="nav-link" data-section="projects"><span class="nav-icon">&#128206;</span> Projects</a></li>
-        <li><a href="#" class="nav-link" data-section="deployments"><span class="nav-icon">&#128196;</span> Deployments</a></li>
+        <li><a href="#" class="nav-link" data-section="commits"><span class="nav-icon">&#128200;</span> Commits</a></li>
+        <li><a href="#" class="nav-link" data-section="deployments"><span class="nav-icon">&#128640;</span> Deployments</a></li>
         <li><a href="#" class="nav-link" data-section="build-logs"><span class="nav-icon">&#128223;</span> Build Logs</a></li>
         <li><a href="#" class="nav-link" data-section="domains"><span class="nav-icon">&#128202;</span> Domains</a></li>
         <li><a href="#" class="nav-link" data-section="env"><span class="nav-icon">&#128272;</span> Environment Variables</a></li>
@@ -259,7 +260,32 @@
         </div>
       </section>
 
-      <section id="section-deployments" class="section">
+      <section id="section-commits" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Commits</h1>
+          <p class="section-subtitle">All Git commits from imported repositories</p>
+        </div>
+        <div id="commits-page-wrap" class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>SHA</th>
+                <th>Message</th>
+                <th>Author</th>
+                <th>Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="commits-page-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="commits-page-empty" style="display:none;">
+          <div class="empty-icon">&#128200;</div>
+          <h2>No commits yet</h2>
+          <p>Import a Git repository to see all commits here.</p>
+        </div>
+      </section>
         <div class="section-header">
           <h1 class="section-title">Deployments</h1>
           <p class="section-subtitle">View and manage your deployments</p>

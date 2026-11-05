@@ -410,6 +410,16 @@ function listCommits(projectId, limit = 50) {
   );
 }
 
+function listAllCommits(limit = 100) {
+  return all(
+    `SELECT c.*, p.name as project_name 
+     FROM repository_commits c 
+     JOIN projects p ON p.id = c.project_id 
+     ORDER BY c.author_date DESC LIMIT ?`,
+    [limit]
+  );
+}
+
 function deleteCommits(projectId) {
   run("DELETE FROM repository_commits WHERE project_id = ?", [projectId]);
   saveDb();
@@ -448,10 +458,8 @@ module.exports = {
   listDomains,
   verifyDomain,
   deleteDomain,
-  setProjectGitHub,
-  upsertCommit,
-  getCommitById,
   listCommits,
+  listAllCommits,
   deleteCommits,
   now,
   generateId,
