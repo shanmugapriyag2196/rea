@@ -154,25 +154,20 @@ async function loadDeployments() {
     const tbody = document.getElementById("deployments-table-body");
     const empty = document.getElementById("deployments-empty");
     const wrap = document.getElementById("deployments-table-wrap");
-    if (deployments.length === 0) {
-      if (wrap) wrap.style.display = "none";
-      if (empty) empty.style.display = "flex";
-    } else {
-      if (wrap) wrap.style.display = "block";
-      if (empty) empty.style.display = "none";
-      if (tbody) {
-        tbody.innerHTML = deployments.map((d) => `
-          <tr>
-            <td>${escapeHtml(d.projectName || "-")}</td>
-            <td>${statusBadge(d.status)}</td>
-            <td>${formatDuration(d.build_duration_ms)}</td>
-            <td>${formatDate(d.created_at)}</td>
-            <td>
-              ${d.status === "ready" ? `<a href="/deployments/${d.id}/" target="_blank" class="btn btn-sm btn-outline">Open</a>` : ""}
-              <button class="btn btn-sm btn-outline" onclick="rollbackDeployment('${d.id}')">Rollback</button>
-            </td>
-          </tr>`).join("");
-      }
+    if (wrap) wrap.style.display = "block";
+    if (empty) empty.style.display = "none";
+    if (tbody) {
+      tbody.innerHTML = deployments.map((d) => `
+        <tr>
+          <td>${escapeHtml(d.projectName || "-")}</td>
+          <td>${statusBadge(d.status)}</td>
+          <td>${formatDuration(d.build_duration_ms)}</td>
+          <td>${formatDate(d.created_at)}</td>
+          <td>
+            ${d.status === "ready" ? `<a href="/deployments/${d.id}/" target="_blank" class="btn btn-sm btn-outline">Open</a>` : ""}
+            <button class="btn btn-sm btn-outline" onclick="rollbackDeployment('${d.id}')">Rollback</button>
+          </td>
+        </tr>`).join("") || '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:20px;">No deployments</td></tr>';
     }
   } catch (err) {
     showToast("Failed to load deployments: " + err.message, "error");
@@ -191,23 +186,16 @@ async function loadDomains() {
       } catch {}
     }
     const tbody = document.getElementById("domains-table-body");
-    const empty = document.getElementById("domains-empty");
     const wrap = document.getElementById("domains-list-wrap");
-    if (allDomains.length === 0) {
-      if (wrap) wrap.style.display = "none";
-      if (empty) empty.style.display = "flex";
-    } else {
-      if (wrap) wrap.style.display = "block";
-      if (empty) empty.style.display = "none";
-      if (tbody) {
-        tbody.innerHTML = allDomains.map((d) => `
-          <tr>
-            <td>${escapeHtml(d.projectName || "-")}</td>
-            <td>${escapeHtml(d.name)}</td>
-            <td>${statusBadge(d.verified ? "ready" : "pending")}</td>
-            <td><button class="btn btn-sm btn-outline" onclick="deleteDomain('${d.id}')">Delete</button></td>
-          </tr>`).join("");
-      }
+    if (wrap) wrap.style.display = "block";
+    if (tbody) {
+      tbody.innerHTML = allDomains.map((d) => `
+        <tr>
+          <td>${escapeHtml(d.projectName || "-")}</td>
+          <td>${escapeHtml(d.name)}</td>
+          <td>${statusBadge(d.verified ? "ready" : "pending")}</td>
+          <td><button class="btn btn-sm btn-outline" onclick="deleteDomain('${d.id}')">Delete</button></td>
+        </tr>`).join("") || '<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px;">No domains</td></tr>';
     }
   } catch (err) {
     showToast("Failed to load domains: " + err.message, "error");
