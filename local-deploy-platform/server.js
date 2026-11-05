@@ -792,7 +792,7 @@ app.get("/api/github/branches", async (req, res) => {
 
 app.get("/api/commits", (req, res) => {
   try {
-    const { limit = 100 } = req.query;
+    const { limit = 21 } = req.query;
     const commits = listAllCommits(parseInt(limit, 10));
     res.json({ commits });
   } catch (err) {

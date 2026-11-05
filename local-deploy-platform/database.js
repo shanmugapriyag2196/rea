@@ -410,7 +410,7 @@ function listCommits(projectId, limit = 50) {
   );
 }
 
-function listAllCommits(limit = 100) {
+function listAllCommits(limit = 21) {
   return all(
     `SELECT c.*, p.name as project_name 
      FROM repository_commits c 
