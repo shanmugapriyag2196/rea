@@ -23,21 +23,21 @@
       </div>
     </header>
 
-    <nav class="subnav">
-      <a href="#" class="nav-link active" data-section="overview">Overview</a>
-      <a href="#" class="nav-link" data-section="projects">Projects</a>
-      <a href="#" class="nav-link" data-section="deployments">Deployments</a>
-      <a href="#" class="nav-link" data-section="integrations">Integrations</a>
-      <a href="#" class="nav-link" data-section="domains">Domains</a>
-      <a href="#" class="nav-link" data-section="observability">Observability</a>
-      <a href="#" class="nav-link" data-section="settings">Settings</a>
-    </nav>
+      <nav class="subnav">
+        <a href="#" class="nav-link active" data-section="overview">Overview</a>
+        <a href="#" class="nav-link" data-section="projects">Projects</a>
+        <a href="#" class="nav-link" data-section="commits">Commits</a>
+        <a href="#" class="nav-link" data-section="deployments">Deployments</a>
+        <a href="#" class="nav-link" data-section="integrations">Integrations</a>
+        <a href="#" class="nav-link" data-section="domains">Domains</a>
+        <a href="#" class="nav-link" data-section="observability">Observability</a>
+        <a href="#" class="nav-link" data-section="settings">Settings</a>
+      </nav>
 
     <main class="main">
       <section id="section-overview" class="section active">
         <div class="section-header">
           <h1 class="section-title">Overview</h1>
-          <p class="section-subtitle">Monitor your projects and deployments</p>
         </div>
         <div class="metrics-grid">
           <div class="metric-card"><div class="metric-label">Total Projects</div><div class="metric-value" id="stat-projects">0</div></div>
@@ -87,10 +87,6 @@
 
       <section id="section-deployments" class="section">
         <div class="section-header"><h1 class="section-title">Deployments</h1></div>
-        <div class="filters-bar">
-          <select id="deployment-project-filter"><option value="">All Projects</option></select>
-          <select id="deployment-status-filter"><option value="">All</option><option value="ready">Ready</option><option value="error">Error</option></select>
-        </div>
         <div id="deployments-table-wrap" class="table-wrap">
           <table class="data-table"><thead><tr><th>Project</th><th>Status</th><th>Duration</th><th>Created</th><th>Actions</th></tr></thead><tbody id="deployments-table-body"></tbody></table>
         </div>
@@ -365,29 +361,12 @@
       </section>
 
       <section id="section-commits" class="section">
-        <div class="section-header">
-          <h1 class="section-title">Commits</h1>
-          <p class="section-subtitle">All Git commits from imported repositories</p>
-        </div>
+        <div class="section-header"><h1 class="section-title">Commits</h1></div>
         <div id="commits-page-wrap" class="table-wrap">
           <table class="data-table">
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>SHA</th>
-                <th>Message</th>
-                <th>Author</th>
-                <th>Date</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Project</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr></thead>
             <tbody id="commits-page-body"></tbody>
           </table>
-        </div>
-        <div class="empty-state" id="commits-page-empty" style="display:none;">
-          <div class="empty-icon">&#128200;</div>
-          <h2>No commits yet</h2>
-          <p>Import a Git repository to see all commits here.</p>
         </div>
       </section>
         <div class="section-header">

@@ -58,6 +58,7 @@ function navigateTo(sectionId) {
 
   if (sectionId === "overview") loadOverview();
   if (sectionId === "projects") loadProjects();
+  if (sectionId === "commits") loadAllCommitsPage();
   if (sectionId === "deployments") loadDeployments();
   if (sectionId === "domains") loadDomains();
   if (sectionId === "env") loadEnvProjects();
@@ -422,7 +423,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const projectName = document.getElementById("import-repo-name").value;
     if (!repoUrl || !projectName) return showToast("Repo URL and name required", "error");
     try {
-      showToast("Importing...", "info");
+      showToast("Importing repository and fetching all commits...", "info");
       const result = await api("/projects/import-git", {
         method: "POST",
         body: JSON.stringify({ repoUrl, projectName }),
@@ -430,7 +431,11 @@ document.addEventListener("DOMContentLoaded", () => {
       document.getElementById("github-import-modal").classList.remove("open");
       showToast(`Imported ${projectName} (${result.commitCount || 0} commits)`, "success");
       loadProjects();
-      setTimeout(() => viewProject(result.project.id), 500);
+      loadOverview();
+      // Navigate to Commits tab to show all commits
+      setTimeout(() => {
+        navigateTo("commits");
+      }, 500);
     } catch (err) {
       showToast(err.message, "error");
     }
