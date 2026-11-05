@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -7,44 +7,69 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div class="app-shell">
+  <div class="shell">
     <header class="topbar">
-      <div class="topbar-left">
-        <span class="brand">VG</span>
-        <span class="team-name">priya-gs-projects</span>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div class="brand">
+          <img class="brand-logo" src="/images/Value-Global.png" alt="VG" onerror="this.style.display='none'">
+          <span class="brand-name">VG Deployment</span>
+        </div>
+        <div class="team-switcher"><span>Personal Account</span><span style="font-size:10px;">▼</span></div>
       </div>
-      <nav class="subnav">
-        <a href="#" class="nav-link active" data-section="projects">Projects</a>
-        <a href="#" class="nav-link" data-section="deployments">Deployments</a>
-        <a href="#" class="nav-link" data-section="env">Env Vars</a>
-      </nav>
       <div class="topbar-right">
+        <div class="cmdk-trigger"><span>Search...</span><span class="cmdk-kbd">⌘K</span></div>
         <button class="btn btn-primary" id="new-project-btn">New Project</button>
+        <div class="user-avatar"></div>
       </div>
     </header>
 
-    <main class="main">
-      <!-- Single-page: Projects + Commits + Settings (no scroll) -->
-      <section id="section-projects" class="section active">
-        <div class="section-header"><h1 class="section-title">Projects</h1></div>
+      <nav class="subnav">
+        <a href="#" class="nav-link active" data-section="overview">Overview</a>
+        <a href="#" class="nav-link" data-section="projects">Projects</a>
+        <a href="#" class="nav-link" data-section="commits">Commits</a>
+        <a href="#" class="nav-link" data-section="deployments">Deployments</a>
+        <a href="#" class="nav-link" data-section="integrations">Integrations</a>
+        <a href="#" class="nav-link" data-section="domains">Domains</a>
+        <a href="#" class="nav-link" data-section="observability">Observability</a>
+        <a href="#" class="nav-link" data-section="settings">Settings</a>
+      </nav>
 
+    <main class="main">
+      <section id="section-overview" class="section active">
+        <div class="section-header">
+          <h1 class="section-title">Overview</h1>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric-card"><div class="metric-label">Total Projects</div><div class="metric-value" id="stat-projects">0</div></div>
+          <div class="metric-card"><div class="metric-label">Total Deployments</div><div class="metric-value" id="stat-deployments">0</div></div>
+          <div class="metric-card"><div class="metric-label">Ready</div><div class="metric-row"><span class="status-dot ready"></span><div class="metric-value" id="stat-ready">0</div></div></div>
+          <div class="metric-card"><div class="metric-label">Failed</div><div class="metric-row"><span class="status-dot failed"></span><div class="metric-value" id="stat-failed">0</div></div></div>
+        </div>
+        <div id="overview-empty" class="empty-state" style="display:none;"><h2>No projects yet</h2><p>Import a repository to get started.</p></div>
+        <div id="recent-deployments" style="display:none;">
+          <h2 style="margin-bottom:16px;font-size:18px;">Recent Deployments</h2>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>Project</th><th>Commit</th><th>Status</th><th>Duration</th><th>Created</th><th>Actions</th></tr></thead>
+              <tbody id="recent-deployments-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="section-projects" class="section">
+        <div class="section-header"><h1 class="section-title">Projects</h1></div>
         <div class="filters-bar">
+          <input type="text" class="search-input" placeholder="Search projects...">
           <button class="btn btn-primary" id="show-import-git-modal">Import Git Repository</button>
         </div>
-
         <div class="modal-overlay" id="github-import-modal">
           <div class="modal">
-            <div class="modal-header">
-              <h3>Import Git Repository</h3>
-              <button class="modal-close" id="close-github-import">&times;</button>
-            </div>
+            <div class="modal-header"><h3>Import Git Repository</h3><button class="modal-close" id="close-github-import">&times;</button></div>
             <div class="modal-body">
-              <div class="form-group">
-                <label>GitHub Token (optional)</label>
-                <input type="password" id="github-token-input" placeholder="ghp_xxx">
-              </div>
+              <div class="form-group"><label>GitHub Token (optional)</label><input type="password" id="github-token-input" placeholder="ghp_xxx"></div>
               <button class="btn btn-outline" id="load-github-repos" style="margin-bottom:12px;">Browse Repos</button>
-              <div id="github-repos-list" style="display:none; max-height:180px; overflow:auto; border:1px solid var(--border); border-radius:6px; margin-bottom:12px;">
+              <div id="github-repos-list" style="display:none; max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; margin-bottom:12px;">
                 <div id="github-repos-loading" style="padding:12px;text-align:center;color:var(--muted);">Loading...</div>
                 <div id="github-repos-items" style="display:none;"></div>
               </div>
@@ -54,114 +79,466 @@
             </div>
           </div>
         </div>
-
-        <div class="single-page-grid">
-          <div class="panel">
-            <h3 class="panel-title">Projects</h3>
-            <div id="projects-list" class="table-wrap">
-              <table class="data-table">
-                <thead><tr><th>Name</th><th>Framework</th><th>Created</th><th>Actions</th></tr></thead>
-                <tbody id="projects-table-body"></tbody>
-              </table>
-            </div>
-            <div id="projects-empty" class="empty-inline" style="display:none;">No projects yet.</div>
-          </div>
-
-          <div class="panel">
-            <h3 class="panel-title">Commits (21)</h3>
-            <div id="commits-page-wrap" class="table-wrap">
-              <table class="data-table">
-                <thead><tr><th>Project</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr></thead>
-                <tbody id="commits-page-body"></tbody>
-              </table>
-            </div>
-          </div>
-
-          <div class="panel">
-            <h3 class="panel-title">Settings</h3>
-            <div class="card compact-card">
-              <div class="form-group"><label>Host</label><input type="text" value="127.0.0.1" readonly></div>
-              <div class="form-group"><label>Port</label><input type="text" value="3456" readonly></div>
-              <div class="form-group"><label>Mode</label><input type="text" value="Local-only" readonly></div>
-            </div>
-          </div>
+        <div id="projects-list" class="table-wrap">
+          <table class="data-table"><thead><tr><th>Name</th><th>Framework</th><th>Created</th><th>Actions</th></tr></thead><tbody id="projects-table-body"></tbody></table>
         </div>
-
-        <!-- Project detail (kept for app.js compatibility) -->
-        <div id="project-detail" style="display:none; margin-top:16px;">
-          <button class="btn btn-outline" id="back-to-projects" style="margin-bottom:12px;">← Back</button>
-          <h2 class="section-title" id="project-detail-name"></h2>
-          <p id="project-detail-description" style="display:none;"></p>
-          <div class="card" style="margin:12px 0;">
-            <form id="deploy-project-form">
-              <input type="file" id="deploy-zip" accept=".zip" required style="margin-bottom:8px;display:block;">
-              <button type="submit" class="btn btn-primary">Deploy</button>
-            </form>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
-              <tbody id="project-deployments-table-body"></tbody>
-            </table>
-          </div>
-          <div class="table-wrap" style="margin-top:12px;">
-            <table class="data-table">
-              <thead><tr><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr></thead>
-              <tbody id="project-detail-commits-body"></tbody>
-            </table>
-          </div>
-        </div>
+        <div id="projects-empty" class="empty-state" style="display:none;"><h2>No projects</h2></div>
       </section>
 
-      <!-- Hidden/compat sections & elements for app.js -->
       <section id="section-deployments" class="section">
         <div class="section-header"><h1 class="section-title">Deployments</h1></div>
-        <div class="filters-bar">
-          <select id="deployment-project-filter"></select>
-          <select id="deployment-status-filter"></select>
-        </div>
         <div id="deployments-table-wrap" class="table-wrap">
           <table class="data-table"><thead><tr><th>Project</th><th>Status</th><th>Duration</th><th>Created</th><th>Actions</th></tr></thead><tbody id="deployments-table-body"></tbody></table>
         </div>
-        <div id="deployments-empty" class="empty-inline" style="display:none;">No deployments.</div>
+      </section>
+
+      <section id="section-integrations" class="section"><div class="section-header"><h1 class="section-title">Integrations</h1></div><div class="card"><h3>GitHub</h3><p style="color:var(--muted);">Connect to import repositories.</p></div></section>
+      <section id="section-domains" class="section"><div class="section-header"><h1 class="section-title">Domains</h1></div><div id="domains-list-wrap" class="table-wrap" style="display:none;"><table class="data-table"><thead><tr><th>Project</th><th>Domain</th><th>Status</th><th>Actions</th></tr></thead><tbody id="domains-table-body"></tbody></table></div></section>
+      <section id="section-observability" class="section"><div class="section-header"><h1 class="section-title">Observability</h1></div></section>
+      <section id="section-settings" class="section"><div class="section-header"><h1 class="section-title">Settings</h1></div><div class="card"><h3>General</h3><p style="color:var(--muted);">Local mode (127.0.0.1)</p></div></section>
+
+      <div id="project-detail" style="display:none;">
+        <button class="btn btn-outline" id="back-to-projects" style="margin-bottom:16px;">← Back</button>
+        <h1 class="section-title" id="project-detail-name"></h1>
+        <p class="section-subtitle" id="project-detail-description"></p>
+        <div class="subnav" style="margin:16px -24px 24px;padding:0 24px;">
+          <button class="nav-link tab-btn active" data-tab="deployments" style="background:none;border:none;cursor:pointer;">Deployments</button>
+          <button class="nav-link tab-btn" data-tab="commits" style="background:none;border:none;cursor:pointer;">Commits</button>
+        </div>
+        <div id="tab-deployments" class="tab-content">
+          <div class="card"><form id="deploy-project-form"><input type="file" id="deploy-zip" accept=".zip" required style="margin-bottom:12px;display:block;"><button type="submit" class="btn btn-primary">Deploy</button></form></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody id="project-deployments-table-body"></tbody></table></div>
+        </div>
+        <div id="tab-commits" class="tab-content" style="display:none;">
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr></thead><tbody id="project-detail-commits-body"></tbody></table></div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/js/app.js"></script>
+</body>
+
+      <section id="section-projects" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Projects</h1>
+          <p class="section-subtitle">Import a Git repository to deploy</p>
+        </div>
+        <div class="projects-header" style="display: flex; gap: 0.75rem; margin-bottom: 1.5rem;">
+          <button class="btn btn-primary" id="show-import-git-modal">Import Git Repository</button>
+        </div>
+        
+        <!-- Vercel-style GitHub Import Modal -->
+        <div class="modal-overlay" id="github-import-modal">
+          <div class="modal" style="max-width: 600px;">
+            <div class="modal-header">
+              <h3>Import Git Repository</h3>
+              <button class="modal-close" id="close-github-import">&times;</button>
+            </div>
+            <div class="modal-body">
+              <div class="form-group">
+                <label for="github-token-input">GitHub Personal Access Token</label>
+                <input type="password" id="github-token-input" placeholder="ghp_xxxxxxxxxxxx">
+                <p class="field-hint">Needed to access your repositories. Token is stored locally.</p>
+                <button class="btn btn-outline" id="load-github-repos">Connect to GitHub</button>
+              </div>
+              <div id="github-repos-list" style="display:none; max-height: 300px; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 1rem;">
+                <div id="github-repos-loading" style="padding: 1rem; text-align: center;">Loading repositories...</div>
+                <div id="github-repos-items" style="display:none;"></div>
+              </div>
+              <div id="github-import-details" style="display:none; margin-top: 1rem;">
+                <div class="form-group">
+                  <label for="import-repo-name">Project Name</label>
+                  <input type="text" id="import-repo-name">
+                </div>
+                <div class="form-group">
+                  <label for="import-branch">Branch</label>
+                  <select id="import-branch"></select>
+                </div>
+                <button class="btn btn-primary" id="do-import-git">Import</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div id="projects-list" class="table-wrap">
+        
+        <div class="card" id="create-project-form-container" style="display:none; margin-bottom: 1.5rem;">
+          <h3 style="margin-bottom: 1rem;">Create New Project</h3>
+          <form id="create-project-inline-form">
+            <div class="form-group">
+              <label for="project-name-inline">Project Name</label>
+              <input type="text" id="project-name-inline" name="name" placeholder="e.g. my-website" required>
+              <p class="field-hint">Letters, numbers, hyphens, and underscores only</p>
+            </div>
+            <div class="form-group">
+              <label for="project-description-inline">Description (optional)</label>
+              <input type="text" id="project-description-inline" name="description" placeholder="Describe your project">
+            </div>
+            <div class="form-group">
+              <label for="project-framework-inline">Framework</label>
+              <select id="project-framework-inline" name="framework">
+                <option value="static">Static HTML/CSS/JS</option>
+                <option value="vite">Vite</option>
+                <option value="react">React</option>
+                <option value="nextjs">Next.js</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+              <button type="submit" class="btn btn-primary">Create Project</button>
+              <button type="button" class="btn btn-outline" id="cancel-create-project-inline">Cancel</button>
+            </div>
+          </form>
+        </div>
+        
+        <div class="card" id="import-git-form-container" style="display:none; margin-bottom: 1.5rem;">
+          <h3 style="margin-bottom: 1rem;">Import Git Repository</h3>
+          <p style="color: var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">Import a repository from GitHub, GitLab, or other Git providers</p>
+          <form id="import-git-form">
+            <div class="form-group">
+              <label for="git-repo-url">Repository URL</label>
+              <input type="url" id="git-repo-url" name="repoUrl" placeholder="https://github.com/username/repo" required>
+              <p class="field-hint">Enter the repository URL</p>
+            </div>
+            <div class="form-group">
+              <label for="git-project-name">Project Name</label>
+              <input type="text" id="git-project-name" name="projectName" required>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+              <button type="submit" class="btn btn-primary">Import</button>
+              <button type="button" class="btn btn-outline" id="cancel-import-git">Cancel</button>
+            </div>
+          </form>
+        </div>
+        
+        <div id="projects-list" class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Framework</th>
+                <th>Deployments</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="projects-table-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="projects-empty" style="display:none;">
+          <div class="empty-icon">&#128206;</div>
+          <h2>No projects</h2>
+          <p>Create your first project to start deploying.</p>
+          <button class="btn btn-primary" id="create-project-from-empty-2">Create Project</button>
+        </div>
+        <!-- Project detail view -->
+        <div id="project-detail" style="display:none;">
+          <div class="section-header">
+            <button class="btn btn-outline" id="back-to-projects" style="margin-bottom: 1rem;">← Back to Projects</button>
+            <h1 class="section-title" id="project-detail-name"></h1>
+            <p class="section-subtitle" id="project-detail-description"></p>
+          </div>
+          
+          <!-- Vercel-style tabs -->
+          <div class="tabs" style="display: flex; gap: 2rem; border-bottom: 2px solid #e2e8f0; margin-bottom: 2rem;">
+            <button class="tab-btn active" data-tab="deployments" style="padding: 0.75rem 0; background: none; border: none; border-bottom: 2px solid #000; margin-bottom: -2px; cursor: pointer;">Deployments</button>
+            <button class="tab-btn" data-tab="commits" style="padding: 0.75rem 0; background: none; border: none; cursor: pointer;">Commits</button>
+            <button class="tab-btn" data-tab="settings" style="padding: 0.75rem 0; background: none; border: none; cursor: pointer;">Settings</button>
+          </div>
+          
+          <div id="tab-deployments" class="tab-content">
+            <div class="card" style="margin-bottom: 1.5rem;">
+              <h3 style="margin-bottom: 1rem;">Deploy New Version</h3>
+              <form id="deploy-project-form" enctype="multipart/form-data">
+                <div class="form-group">
+                  <label for="deploy-zip">Upload ZIP File</label>
+                  <input type="file" id="deploy-zip" name="zip" accept=".zip" required>
+                  <p class="field-hint">Upload a ZIP containing your static website files</p>
+                </div>
+                <button type="submit" class="btn btn-primary">Deploy</button>
+              </form>
+            </div>
+            <h2 class="subsection-title">Recent Deployments</h2>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Commit</th>
+                    <th>Status</th>
+                    <th>Duration</th>
+                    <th>Created</th>
+                    <th>URL</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="project-deployments-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+          
+          <div id="tab-commits" class="tab-content" style="display:none;">
+            <h2 class="subsection-title">Commits</h2>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Commit</th>
+                    <th>Message</th>
+                    <th>Author</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="project-detail-commits-body"></tbody>
+              </table>
+            </div>
+            <div id="project-detail-commits-empty" style="display:none; padding: 2rem; text-align: center; color: var(--text-secondary);">
+              No commits found
+            </div>
+          </div>
+          
+          <div id="tab-settings" class="tab-content" style="display:none;">
+            <div class="card">
+              <h3>Git Repository</h3>
+              <p id="project-settings-git"></p>
+            </div>
+          </div>
+        </div>
+
+          <!-- GitHub Connect -->
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <h3 style="margin-bottom: 1rem;">GitHub Repository</h3>
+            <div id="github-connected" style="display:none; margin-bottom: 1rem;">
+              <p><strong>Repo:</strong> <span id="github-repo-display"></span></p>
+              <p><strong>Branch:</strong> <span id="github-branch-display"></span></p>
+              <p><strong>Last Synced:</strong> <span id="github-synced-display">Never</span></p>
+              <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-primary" onclick="syncGitHubCommits()">Sync Commits</button>
+                <button class="btn btn-outline" onclick="disconnectGitHub()">Disconnect</button>
+              </div>
+            </div>
+            <div id="github-connect-form" style="margin-bottom: 1rem;">
+              <div class="form-group">
+                <label for="github-repo-url">Repository URL</label>
+                <input type="url" id="github-repo-url" placeholder="https://github.com/owner/repo" required>
+              </div>
+              <div class="form-group">
+                <label for="github-branch">Branch</label>
+                <input type="text" id="github-branch" value="main" placeholder="main">
+              </div>
+              <div class="form-group">
+                <label for="github-token">Personal Access Token</label>
+                <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx" required>
+                <p class="field-hint">Token stored locally only. Needs repo scope for public/private repos.</p>
+              </div>
+              <button class="btn btn-primary" onclick="connectGitHub()">Connect</button>
+            </div>
+          </div>
+
+          <!-- GitHub Commits -->
+          <div class="card" style="margin-bottom: 1.5rem;">
+            <h3 style="margin-bottom: 1rem;">Commits</h3>
+            <div id="commits-empty" style="display:none; padding: 2rem; text-align: center; color: var(--text-secondary);">
+              No commits yet. Connect a GitHub repository and sync.
+            </div>
+            <div id="commits-list-wrap" style="display:none;">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>SHA</th>
+                    <th>Message</th>
+                    <th>Author</th>
+                    <th>Date</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="commits-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="section-commits" class="section">
         <div class="section-header"><h1 class="section-title">Commits</h1></div>
+        <div id="commits-page-wrap" class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Project</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr></thead>
+            <tbody id="commits-page-body"></tbody>
+          </table>
+        </div>
       </section>
 
-      <section id="section-settings" class="section">
-        <div class="section-header"><h1 class="section-title">Settings</h1></div>
-      </section>
-
-      <section id="section-env" class="section">
-        <div class="section-header"><h1 class="section-title">Environment Variables</h1></div>
-        <button class="btn btn-primary" id="show-add-env-btn" style="margin-bottom:12px;">New Variable</button>
-        <div class="filters-bar">
-          <select id="env-project"></select>
-          <select id="env-environment"><option value="production">Production</option><option value="preview">Preview</option><option value="development">Development</option></select>
+      <section id="section-build-logs" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Build Logs</h1>
         </div>
-        <div id="env-table-wrap" class="table-wrap">
-          <table class="data-table"><thead><tr><th>Key</th><th>Type</th><th>Env</th><th>Value</th><th>Actions</th></tr></thead><tbody id="env-table-body"></tbody></table>
+        <div class="build-log-selector">
+          <label for="build-log-deployment">Select Deployment</label>
+          <select id="build-log-deployment"></select>
+          <button class="btn btn-primary" id="refresh-logs">Refresh</button>
         </div>
-        <div id="env-empty" class="empty-inline" style="display:none;">No environment variables.</div>
+        <div class="log-container" id="log-container">
+          <pre class="log-pre" id="build-log-content">Select a deployment to view its logs.</pre>
+        </div>
       </section>
 
       <section id="section-domains" class="section">
-        <div class="section-header"><h1 class="section-title">Domains</h1></div>
-        <div id="domains-list-wrap" class="table-wrap" style="display:none;">
-          <table class="data-table"><thead><tr><th>Project</th><th>Domain</th><th>Status</th><th>Actions</th></tr></thead><tbody id="domains-table-body"></tbody></table>
+        <div class="section-header">
+          <h1 class="section-title">Domains</h1>
+          <p class="section-subtitle">Configure custom domains for your projects</p>
+        </div>
+        <div id="domains-list-wrap" class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Domain</th>
+                <th>Environment</th>
+                <th>Status</th>
+                <th>SSL</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="domains-table-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="domains-empty" style="display:none;">
+          <div class="empty-icon">&#128202;</div>
+          <h2>No custom domains</h2>
+          <p>Add a domain to your project.</p>
+        </div>
+
+        <!-- Add domain modal -->
+        <div class="modal-overlay" id="add-domain-modal">
+          <div class="modal">
+            <div class="modal-header">
+              <h3>Add Domain</h3>
+              <button class="modal-close" id="close-add-domain">&times;</button>
+            </div>
+            <form id="add-domain-form">
+              <div class="form-group">
+                <label for="domain-project">Project</label>
+                <select id="domain-project" name="projectId" required></select>
+              </div>
+              <div class="form-group">
+                <label for="domain-name">Domain Name</label>
+                <input type="text" id="domain-name" name="name" placeholder="example.com" required>
+                <p class="field-hint">Local development only. Enter a domain name for reference.</p>
+              </div>
+              <div class="form-group">
+                <label for="domain-environment">Environment</label>
+                <select id="domain-environment" name="environment">
+                  <option value="production">Production</option>
+                  <option value="preview">Preview</option>
+                </select>
+              </div>
+              <div class="modal-actions">
+                <button type="button" class="btn btn-outline" id="cancel-add-domain">Cancel</button>
+                <button type="submit" class="btn btn-primary">Add Domain</button>
+              </div>
+            </form>
+          </div>
         </div>
       </section>
 
-      <section id="section-overview" class="section">
-        <div id="overview-empty" style="display:none;"></div>
-        <div id="recent-deployments"><div id="recent-deployments-body"></div></div>
-        <span id="stat-projects">0</span><span id="stat-deployments">0</span><span id="stat-ready">0</span><span id="stat-failed">0</span>
+      <section id="section-env" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Environment Variables</h1>
+          <p class="section-subtitle">Configure project environment variables</p>
+        </div>
+        <div class="env-header" style="margin-bottom: 1.5rem;">
+          <button class="btn btn-primary" id="show-add-env-btn">New Environment Variable</button>
+        </div>
+        <div class="env-project-selector">
+          <label for="env-project">Project</label>
+          <select id="env-project"></select>
+          <select id="env-environment">
+            <option value="production">Production</option>
+            <option value="preview">Preview</option>
+            <option value="development">Development</option>
+          </select>
+        </div>
+        
+        <div class="card" id="add-env-form-container" style="display:none; margin-bottom: 1.5rem;">
+          <h3 style="margin-bottom: 1rem;">Add Environment Variable</h3>
+          <form id="add-env-inline-form">
+            <div class="form-group">
+              <label for="env-key-inline">Key</label>
+              <input type="text" id="env-key-inline" name="key" placeholder="API_URL" required>
+            </div>
+            <div class="form-group">
+              <label for="env-value-inline">Value</label>
+              <input type="text" id="env-value-inline" name="value" placeholder="Enter value" required>
+            </div>
+            <div class="form-group">
+              <label for="env-type-inline">Type</label>
+              <select id="env-type-inline" name="type">
+                <option value="config">Config (readable)</option>
+                <option value="secret">Secret (write-only)</option>
+              </select>
+              <p class="field-hint">Secret values cannot be viewed after saving.</p>
+            </div>
+            <div style="display: flex; gap: 0.75rem;">
+              <button type="submit" class="btn btn-primary">Save Variable</button>
+              <button type="button" class="btn btn-outline" id="cancel-add-env-inline">Cancel</button>
+            </div>
+          </form>
+        </div>
+        
+        <div id="env-table-wrap" class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Type</th>
+                <th>Environment</th>
+                <th>Value</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="env-table-body"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="env-empty" style="display:none;">
+          <div class="empty-icon">&#128272;</div>
+          <h2>No environment variables</h2>
+          <p>Add environment variables for your project.</p>
+        </div>
+      </section>
+
+      <section id="section-settings" class="section">
+        <div class="section-header">
+          <h1 class="section-title">Settings</h1>
+          <p class="section-subtitle">Platform configuration</p>
+        </div>
+        <div class="card settings-card">
+          <h3>Server</h3>
+          <p><strong>Host:</strong> 127.0.0.1</p>
+          <p><strong>Port:</strong> <span id="settings-port">3456</span></p>
+          <p><strong>Mode:</strong> Local-only (no public exposure)</p>
+        </div>
+        <div class="card settings-card">
+          <h3>Security</h3>
+          <p>All deployments are local-only.</p>
+          <p>Builds run in isolated worker processes.</p>
+          <p>Archive path traversal is blocked.</p>
+          <p>Secrets are never logged.</p>
+        </div>
+        <div class="card settings-card">
+          <h3>About</h3>
+          <p>VG Deployment App v1.0.0</p>
+          <p>An original developer deployment platform.</p>
+          <p>Local-only. Not affiliated with any external service.</p>
+        </div>
       </section>
     </main>
   </div>
+
+  <!-- Toast notification -->
   <div class="toast" id="toast"></div>
+
   <script src="/js/app.js"></script>
 </body>
 </html>

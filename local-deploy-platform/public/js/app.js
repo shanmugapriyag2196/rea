@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 const API_BASE = "/api";
 let projects = [];
@@ -57,8 +57,8 @@ function navigateTo(sectionId) {
   });
 
   if (sectionId === "overview") loadOverview();
-    if (sectionId === "projects") { loadProjects(); loadAllCommitsPage(); }
-    if (sectionId === "commits") loadAllCommitsPage();
+  if (sectionId === "projects") loadProjects();
+  if (sectionId === "commits") loadAllCommitsPage();
   if (sectionId === "deployments") loadDeployments();
   if (sectionId === "domains") loadDomains();
   if (sectionId === "env") loadEnvProjects();
@@ -310,30 +310,7 @@ async function loadProjectDetailCommits(projectId) {
   }
 }
 
-  async function loadAllCommitsPage() {
-    const tbody = document.getElementById("commits-page-body");
-    if (!tbody) return;
-    try {
-      const data = await api("/commits?limit=21");
-      const commits = Array.isArray(data) ? data : data.commits || [];
-      if (commits.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No commits found</td></tr>';
-        return;
-      }
-      tbody.innerHTML = commits.map((c) => `
-        <tr>
-          <td>${escapeHtml(c.project_name || c.projectName || "")}</td>
-          <td><code>${(c.sha || "").slice(0, 7)}</code></td>
-          <td>${escapeHtml((c.message || "").split("\n")[0])}</td>
-          <td>${escapeHtml(c.author_name || c.authorName || "")}</td>
-          <td>${formatDate(c.author_date || c.authorDate || c.created_at)}</td>
-        </tr>`).join("");
-    } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
-    }
-  }
-
-  async function deleteProject(id) {
+async function deleteProject(id) {
   if (!confirm("Delete this project?")) return;
   try {
     await api(`/projects/${id}`, { method: "DELETE" });
