@@ -57,8 +57,8 @@ function navigateTo(sectionId) {
   });
 
   if (sectionId === "overview") loadOverview();
-  if (sectionId === "projects") loadProjects();
-  if (sectionId === "commits") loadAllCommitsPage();
+    if (sectionId === "projects") { loadProjects(); loadAllCommitsPage(); }
+    if (sectionId === "commits") loadAllCommitsPage();
   if (sectionId === "deployments") loadDeployments();
   if (sectionId === "domains") loadDomains();
   if (sectionId === "env") loadEnvProjects();
