@@ -369,49 +369,10 @@
           </table>
         </div>
       </section>
-        <div class="section-header">
-          <h1 class="section-title">Deployments</h1>
-          <p class="section-subtitle">View and manage your deployments</p>
-        </div>
-        <div class="deployments-filters">
-          <select id="deployment-project-filter">
-            <option value="">All Projects</option>
-          </select>
-          <select id="deployment-status-filter">
-            <option value="">All Statuses</option>
-            <option value="ready">Ready</option>
-            <option value="building">Building</option>
-            <option value="error">Error</option>
-            <option value="pending">Pending</option>
-          </select>
-        </div>
-        <div id="deployments-table-wrap" class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Version</th>
-                <th>Status</th>
-                <th>Duration</th>
-                <th>Files</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="deployments-table-body"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="deployments-empty" style="display:none;">
-          <div class="empty-icon">&#128196;</div>
-          <h2>No deployments</h2>
-          <p>Deploy a project to see it here.</p>
-        </div>
-      </section>
 
       <section id="section-build-logs" class="section">
         <div class="section-header">
           <h1 class="section-title">Build Logs</h1>
-          <p class="section-subtitle">View deployment build logs</p>
         </div>
         <div class="build-log-selector">
           <label for="build-log-deployment">Select Deployment</label>
@@ -420,11 +381,6 @@
         </div>
         <div class="log-container" id="log-container">
           <pre class="log-pre" id="build-log-content">Select a deployment to view its logs.</pre>
-        </div>
-        <div class="empty-state" id="build-logs-empty" style="display:none;">
-          <div class="empty-icon">&#128223;</div>
-          <h2>No build logs</h2>
-          <p>No deployment logs available yet.</p>
         </div>
       </section>
 
