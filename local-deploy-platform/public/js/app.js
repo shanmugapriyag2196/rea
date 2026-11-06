@@ -265,14 +265,36 @@ function viewProject(id) {
   if (!project) return showToast("Project not found", "error");
   currentProjectId = id;
   document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
+  document.querySelectorAll(".nav-link[data-section]").forEach((l) => l.classList.remove("active"));
+  document.querySelector('[data-section="projects"]')?.classList.add("active");
   document.getElementById("project-detail").style.display = "block";
   document.getElementById("project-detail-name").textContent = project.name;
   document.getElementById("project-detail-description").textContent = project.description || "";
-  document.querySelectorAll(".tab-btn").forEach((b, i) => b.classList.toggle("active", i === 0));
-  document.querySelectorAll(".tab-content").forEach((tc, i) => (tc.style.display = i === 0 ? "block" : "none"));
+  document.querySelectorAll(".tab-btn").forEach((b, i) => b.classList.toggle("active", b.dataset.tab ? b.dataset.tab === "deployments" : i === 0));
+  document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = tc.id === "tab-deployments" ? "block" : "none"));
   loadProjectDeployments(id);
   loadProjectDetailCommits(id);
 }
+
+function openCommitInDashboard(projectId, sha) {
+  if (!projectId) { showToast("No project for this commit", "error"); return; }
+  const project = projects.find((p) => p.id === projectId);
+  if (!project) {
+    // ensure projects loaded
+    api("/projects").then((list) => { projects = Array.isArray(list) ? list : list.projects || []; viewProject(projectId); setTimeout(() => focusProjectCommit(sha), 150); }).catch(() => showToast("Project not found", "error"));
+    return;
+  }
+  viewProject(projectId);
+  setTimeout(() => focusProjectCommit(sha), 150);
+}
+
+function focusProjectCommit(sha) {
+  // switch to commits tab in project detail
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === "commits"));
+  document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = tc.id === "tab-commits" ? "block" : "none"));
+  if (currentProjectId) loadProjectDetailCommits(currentProjectId, sha);
+}
+
 
 function loadProjectDeployments(projectId) {
   const tbody = document.getElementById("project-deployments-table-body");
@@ -340,11 +362,12 @@ async function loadProjectDetailCommits(projectId) {
         const msg = escapeHtml((c.message || "").split("\n")[0] || "—");
         const author = escapeHtml(c.author_name || c.authorName || "—");
         const project = escapeHtml(c.project_name || c.projectName || "—");
+        const projectId = c.project_id || c.projectId || "";
         const date = formatDate(c.author_date || c.authorDate || c.created_at);
         return `
-        <tr class="commit-row">
+        <tr class="commit-row" data-project-id="${escapeHtml(projectId)}" data-sha="${escapeHtml(sha)}">
           <td class="commit-project">${project}</td>
-          <td class="commit-sha"><span class="commit-pill" title="${escapeHtml(sha)}">${short || "—"}</span></td>
+          <td class="commit-sha"><button type="button" class="commit-pill commit-link" onclick="openCommitInDashboard('${escapeHtml(projectId)}','${escapeHtml(sha)}')" title="View in dashboard">${short || "—"}</button></td>
           <td class="commit-message" title="${msg}">${msg}</td>
           <td class="commit-author">${author}</td>
           <td class="commit-date">${date}</td>
@@ -372,10 +395,45 @@ async function loadProjectDetailCommits(projectId) {
 async function viewDeployment(id) {
   try {
     const d = await api(`/deployments/${id}`);
-    alert(`Deployment ${d.id}\nStatus: ${d.status}\nCreated: ${formatDate(d.created_at)}`);
+    const project = projects.find((p) => p.id === d.project_id);
+    if (project) {
+      viewProject(project.id);
+      setTimeout(() => {
+        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === "deployments"));
+        document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = tc.id === "tab-deployments" ? "block" : "none"));
+      }, 50);
+    } else {
+      navigateTo("deployments");
+    }
+    showDeploymentDetail(d);
   } catch (err) {
     showToast(err.message, "error");
   }
+}
+
+function showDeploymentDetail(d) {
+  let panel = document.getElementById("deployment-detail-panel");
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = "deployment-detail-panel";
+    panel.className = "card";
+    panel.style.margin = "12px 0";
+    const host = document.getElementById("tab-deployments") || document.querySelector("#section-deployments .section-header")?.parentElement;
+    if (host) host.insertBefore(panel, host.querySelector(".table-wrap") || host.children[1] || null);
+    else document.querySelector(".main")?.prepend(panel);
+  }
+  const url = d.status === "ready" ? `${location.origin}/deployments/${d.id}/` : "";
+  panel.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+      <div>
+        <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">Deployment</div>
+        <div style="font-size:16px;font-weight:600;margin-top:2px;">${escapeHtml(d.id.slice(0,12))}… ${statusBadge(d.status)}</div>
+        <div style="color:var(--muted);font-size:13px;margin-top:4px;">Created ${formatDate(d.created_at)}${d.commit_sha ? ` · Commit <code>${escapeHtml(String(d.commit_sha).slice(0,7))}</code>` : ""}</div>
+        ${url ? `<div style="margin-top:8px;"><a href="${url}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Visit</a> <span style="color:var(--muted);font-size:12px;margin-left:8px;">${escapeHtml(url)}</span></div>` : `<div style="margin-top:8px;color:var(--muted);font-size:13px;">${d.status === "building" ? "Building…" : "No deployed URL for this status."}</div>`}
+      </div>
+      <button class="btn btn-sm btn-outline" onclick="document.getElementById('deployment-detail-panel')?.remove()">Close</button>
+    </div>`;
+  panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 async function rollbackDeployment(id) {
@@ -413,6 +471,8 @@ async function deleteEnvVar(id, projectId) {
 }
 
 window.viewProject = viewProject;
+window.openCommitInDashboard = openCommitInDashboard;
+window.showDeploymentDetail = showDeploymentDetail;
 window.deleteProject = deleteProject;
 window.viewDeployment = viewDeployment;
 window.rollbackDeployment = rollbackDeployment;
@@ -536,3 +596,4 @@ document.addEventListener("DOMContentLoaded", () => {
 
   loadOverview();
 });
+

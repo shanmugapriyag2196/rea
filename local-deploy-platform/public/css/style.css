@@ -253,3 +253,5 @@ input:focus, select:focus, textarea:focus { border-color: var(--border-hover); }
 #section-commits.active { padding-top: 0; }
 #section-commits .section-header { margin-bottom: 8px; margin-top: 0; }
 #section-commits .section-subtitle { margin-bottom: 0; }
+.commit-link { cursor: pointer; border: 1px solid #333; }
+.commit-link:hover { border-color: #555; background: #1a1a1a; }
