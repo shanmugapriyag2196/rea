@@ -410,7 +410,15 @@ function listCommits(projectId, limit = 50) {
   );
 }
 
-function listAllCommits(limit = 100) {
+function listAllCommits(limit) {
+  if (limit == null) {
+    return all(
+      `SELECT c.*, p.name as project_name 
+       FROM repository_commits c 
+       JOIN projects p ON p.id = c.project_id 
+       ORDER BY c.author_date DESC`
+    );
+  }
   return all(
     `SELECT c.*, p.name as project_name 
      FROM repository_commits c 

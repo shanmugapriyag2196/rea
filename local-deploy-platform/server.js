@@ -792,8 +792,8 @@ app.get("/api/github/branches", async (req, res) => {
 
 app.get("/api/commits", (req, res) => {
   try {
-    const { limit = 100 } = req.query;
-    const commits = listAllCommits(parseInt(limit, 10));
+    const { limit } = req.query;
+    const commits = limit ? listAllCommits(parseInt(limit, 10)) : listAllCommits();
     res.json({ commits });
   } catch (err) {
     res.status(500).json({ error: "Failed to list all commits", message: err.message });
