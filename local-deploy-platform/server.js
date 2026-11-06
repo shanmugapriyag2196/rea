@@ -17,10 +17,13 @@ const {
   deleteProject,
   createDeployment,
   getDeploymentById,
+  getDeploymentByCommit,
   listDeployments,
   updateDeployment,
   getNextVersion,
   run,
+  get,
+  all,
   setEnvVar,
   listEnvVars,
   deleteEnvVar,
@@ -30,6 +33,7 @@ const {
   deleteDomain,
   setProjectGitHub,
   upsertCommit,
+  getCommitById,
   listCommits,
   listAllCommits,
   deleteCommits,
@@ -476,9 +480,91 @@ app.get("/api/deployments/:deploymentId", (req, res) => {
     if (!deployment) {
       return res.status(404).json({ error: "Deployment not found" });
     }
-    res.json(deployment);
+    const project = getProjectById(deployment.project_id);
+    const domains = project ? listDomains(project.id) : [];
+    let commit = null;
+    if (deployment.commit_sha && project) {
+      commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, deployment.commit_sha]);
+    }
+    res.json({ ...deployment, project, domains, commit });
   } catch (err) {
     res.status(500).json({ error: "Failed to get deployment", message: err.message });
+  }
+});
+
+app.get("/api/projects/:projectId/commits/:sha/deployment", (req, res) => {
+  try {
+    const { projectId, sha } = req.params;
+    const project = getProjectById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const deployment = getDeploymentByCommit(projectId, sha);
+    const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [projectId, sha]);
+    res.json({ deployment, commit, project });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to resolve commit deployment", message: err.message });
+  }
+});
+
+function copyDir(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (entry.name === ".git") continue;
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
+
+app.post("/api/projects/:projectId/deploy-commit", (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { sha, branch } = req.body || {};
+    if (!sha || typeof sha !== "string") return res.status(400).json({ error: "Commit SHA is required" });
+    const project = getProjectById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const repoDir = path.join(WORKSPACE_DIR, projectId, "repo");
+    if (!fs.existsSync(path.join(repoDir, ".git"))) {
+      return res.status(400).json({ error: "No cloned repository found for this project. Re-import the Git repository." });
+    }
+
+    const existing = getDeploymentByCommit(projectId, sha);
+    if (existing) return res.json({ deployment: existing, reused: true });
+
+    const version = getNextVersion(projectId);
+    const deployment = createDeployment(projectId, version, "building", { commitSha: sha, branch: branch || project.github_branch || "main", environment: "production" });
+    const deployArtifactDir = path.join(ARTIFACT_DIR, deployment.id);
+    fs.mkdirSync(deployArtifactDir, { recursive: true });
+    updateDeployment(deployment.id, { status: "building", build_started_at: now() });
+
+    try {
+      const tmpZip = path.join(LOG_DIR, `tmp-deploy-${deployment.id}.zip`);
+      try { fs.rmSync(tmpZip, { force: true }); } catch {}
+      const archive = spawnSync("git", ["-C", repoDir, "archive", "--format=zip", "-o", tmpZip, sha], { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+      if (archive.status !== 0 || !fs.existsSync(tmpZip)) throw new Error((archive.stderr || archive.stdout || "git archive failed").trim());
+      safeExtractZip(tmpZip, deployArtifactDir);
+      try { fs.rmSync(tmpZip, { force: true }); } catch {}
+
+      const { count: fileCount, totalSize } = countFilesAndSize(deployArtifactDir);
+      const updated = updateDeployment(deployment.id, {
+        status: "ready",
+        build_completed_at: now(),
+        build_duration_ms: Math.max(0, now() - (deployment.created_at || now())),
+        file_count: fileCount,
+        total_size: totalSize,
+        url_path: `/deployments/${deployment.id}`,
+        artifact_path: deployArtifactDir,
+        log_path: `/api/deployments/${deployment.id}/logs`,
+        error_message: null,
+      });
+      res.status(201).json({ deployment: updated, reused: false, url: `http://${HOST}:${PORT}/deployments/${updated.id}/` });
+    } catch (e) {
+      try { fs.rmSync(deployArtifactDir, { recursive: true, force: true }); } catch {}
+      updateDeployment(deployment.id, { status: "error", build_completed_at: now(), error_message: e.message });
+      res.status(422).json({ error: "Deploy from commit failed", message: e.message, deploymentId: deployment.id });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Failed to deploy commit", message: err.message });
   }
 });
 

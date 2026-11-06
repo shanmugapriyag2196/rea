@@ -367,8 +367,8 @@ async function loadProjectDetailCommits(projectId) {
         return `
         <tr class="commit-row" data-project-id="${escapeHtml(projectId)}" data-sha="${escapeHtml(sha)}">
           <td class="commit-project">${project}</td>
-          <td class="commit-sha"><button type="button" class="commit-pill commit-link" onclick="openCommitInDashboard('${escapeHtml(projectId)}','${escapeHtml(sha)}')" title="View in dashboard">${short || "—"}</button></td>
-          <td class="commit-message" title="${msg}">${msg}</td>
+          <td class="commit-sha"><button type="button" class="commit-pill commit-link" onclick="openCommitDeployment('${escapeHtml(projectId)}','${escapeHtml(sha)}')" title="Open deployment page">${short || "—"}</button></td>
+          <td class="commit-message commit-open-deploy" title="${msg}" onclick="openCommitDeployment('${escapeHtml(projectId)}','${escapeHtml(sha)}')">${msg}</td>
           <td class="commit-author">${author}</td>
           <td class="commit-date">${date}</td>
         </tr>`;
@@ -392,48 +392,112 @@ async function loadProjectDetailCommits(projectId) {
   }
 }
 
+let _currentDeploymentId = null;
+
+function setDepTab(tab) {
+  document.querySelectorAll(".dep-tab").forEach((b) => b.classList.toggle("active", b.dataset.depTab === tab));
+  ["deployment","logs","resources","source","opengraph"].forEach((t) => {
+    const p = document.getElementById(`dep-tab-${t}`);
+    if (p) p.style.display = t === tab ? "block" : "none";
+  });
+  if (tab === "logs") loadDeploymentLogsForPage();
+}
+
+async function loadDeploymentLogsForPage() {
+  const el = document.getElementById("dep-logs-content");
+  if (!el || !_currentDeploymentId) return;
+  try {
+    const data = await api(`/deployments/${_currentDeploymentId}/logs`);
+    el.textContent = data.logs || "(no logs)";
+  } catch (e) { el.textContent = "Failed to load logs: " + e.message; }
+}
+
 async function viewDeployment(id) {
   try {
     const d = await api(`/deployments/${id}`);
-    const project = projects.find((p) => p.id === d.project_id);
-    if (project) {
-      viewProject(project.id);
-      setTimeout(() => {
-        document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === "deployments"));
-        document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = tc.id === "tab-deployments" ? "block" : "none"));
-      }, 50);
-    } else {
-      navigateTo("deployments");
-    }
-    showDeploymentDetail(d);
+    _currentDeploymentId = d && d.id ? d.id : id;
+    renderDeploymentPage(d);
   } catch (err) {
     showToast(err.message, "error");
   }
 }
 
-function showDeploymentDetail(d) {
-  let panel = document.getElementById("deployment-detail-panel");
-  if (!panel) {
-    panel = document.createElement("div");
-    panel.id = "deployment-detail-panel";
-    panel.className = "card";
-    panel.style.margin = "12px 0";
-    const host = document.getElementById("tab-deployments") || document.querySelector("#section-deployments .section-header")?.parentElement;
-    if (host) host.insertBefore(panel, host.querySelector(".table-wrap") || host.children[1] || null);
-    else document.querySelector(".main")?.prepend(panel);
+function showDeploymentDetail(d) { renderDeploymentPage(d); }
+
+function renderDeploymentPage(d) {
+  _currentDeploymentId = d && d.id ? d.id : _currentDeploymentId;
+  document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
+  document.querySelectorAll(".nav-link[data-section]").forEach((l) => l.classList.remove("active"));
+  const pd = document.getElementById("project-detail"); if (pd) pd.style.display = "none";
+  const sec = document.getElementById("section-deployment-detail");
+  if (!sec) { navigateTo("deployments"); return; }
+  sec.classList.add("active");
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+
+  const project = d.project || projects.find((p) => p.id === d.project_id) || {};
+  const sha = (d.commit_sha || "").toString();
+  const short = sha ? sha.slice(0,7) : (d.id || "").slice(0,8);
+  const status = d.status || "pending";
+  const url = status === "ready" ? `${location.origin}/deployments/${d.id}/` : "";
+  const branch = d.branch || project.github_branch || "main";
+  const domains = Array.isArray(d.domains) ? d.domains : [];
+
+  const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  const txt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  txt("dep-id", short);
+  set("dep-subtitle", `Project Deployments · ${escapeHtml(project.name || "Project")}`);
+  const visit = document.getElementById("dep-visit");
+  if (visit) { visit.style.display = url ? "inline-flex" : "none"; if (url) visit.href = url; }
+
+  txt("dep-created", d.created_at ? new Date(d.created_at).toLocaleString() : "—");
+  set("dep-status", `${statusBadge(status)}${status === "ready" ? ' <span style="color:var(--muted);font-size:12px;margin-left:6px;">Current</span>' : ''}`);
+  txt("dep-duration", formatDuration(d.build_duration_ms));
+  set("dep-env", `<strong style="color:#fff;">${escapeHtml((d.environment || "production").replace(/^./, c=>c.toUpperCase()))}</strong>${status === "ready" ? ' <span class="dep-pill">Current</span>' : ''}`);
+  set("dep-domains", domains.length ? domains.map(x => `<div><span style="color:#fff;">${escapeHtml(x.name || x.domain)}</span></div>`).join("") : (url ? `<a href="${url}" target="_blank" rel="noopener" style="color:#fff;">${escapeHtml(location.host)}/deployments/${escapeHtml(d.id)}/</a>` : '<span style="color:var(--muted);">No domain</span>'));
+  set("dep-source", `<div><span class="dep-pill">${escapeHtml(branch)}</span></div><div style="margin-top:6px;"><code>${escapeHtml(short)}</code> ${d.commit?.message ? `<span style="color:#ccc;">${escapeHtml((d.commit.message||'').split('\n')[0])}</span>` : ''}</div>`);
+
+  txt("dep-build-summary", status === "ready" ? `Build completed in ${formatDuration(d.build_duration_ms)} · ${d.file_count || 0} files` : (d.error_message ? d.error_message : "—"));
+  set("dep-summary-rows", [
+    ["Project", escapeHtml(project.name || "—")],
+    ["Deployment ID", `<code>${escapeHtml(d.id || '')}</code>`],
+    ["Commit", sha ? `<code>${escapeHtml(short)}</code>` : "—"],
+    ["Branch", escapeHtml(branch)],
+    ["Files", escapeHtml(String(d.file_count ?? "—"))],
+    ["Total size", d.total_size ? escapeHtml((d.total_size/1024).toFixed(1) + " KB") : "—"],
+  ].map(([k,v]) => `<div class="dep-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join(""));
+  set("dep-source-rows", [
+    ["Repository", escapeHtml(project.github_repo_url || "—")],
+    ["Branch", escapeHtml(branch)],
+    ["Commit", sha ? `<code>${escapeHtml(sha)}</code>` : "—"],
+    ["Author", escapeHtml(d.commit?.author_name || "—")],
+    ["Date", escapeHtml(d.commit?.author_date || "—")],
+  ].map(([k,v]) => `<div class="dep-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join(""));
+
+  const logs = document.getElementById("dep-logs-content");
+  if (logs) logs.textContent = "Loading…";
+  setDepTab("deployment");
+}
+
+async function openCommitDeployment(projectId, sha) {
+  if (!projectId || !sha) return showToast("Missing project/commit", "error");
+  try {
+    showToast(`Opening deployment for ${sha.slice(0,7)}…`, "info");
+    if (!projects.length) { try { projects = await api("/projects"); } catch {} }
+    const data = await api(`/projects/${projectId}/commits/${encodeURIComponent(sha)}/deployment`);
+    let dep = data && data.deployment;
+    if (!dep) {
+      showToast(`Creating deployment for ${sha.slice(0,7)}…`, "info");
+      const created = await api(`/projects/${projectId}/deploy-commit`, { method: "POST", body: JSON.stringify({ sha }) });
+      dep = created.deployment;
+      if (!dep) throw new Error(created.error || "Deployment was not created");
+    }
+    _currentDeploymentId = dep.id;
+    const full = await api(`/deployments/${dep.id}`);
+    if (full && !full.commit && data.commit) full.commit = data.commit;
+    renderDeploymentPage(full);
+  } catch (err) {
+    showToast(err.message, "error");
   }
-  const url = d.status === "ready" ? `${location.origin}/deployments/${d.id}/` : "";
-  panel.innerHTML = `
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
-      <div>
-        <div style="font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;">Deployment</div>
-        <div style="font-size:16px;font-weight:600;margin-top:2px;">${escapeHtml(d.id.slice(0,12))}… ${statusBadge(d.status)}</div>
-        <div style="color:var(--muted);font-size:13px;margin-top:4px;">Created ${formatDate(d.created_at)}${d.commit_sha ? ` · Commit <code>${escapeHtml(String(d.commit_sha).slice(0,7))}</code>` : ""}</div>
-        ${url ? `<div style="margin-top:8px;"><a href="${url}" target="_blank" rel="noopener" class="btn btn-sm btn-primary">Visit</a> <span style="color:var(--muted);font-size:12px;margin-left:8px;">${escapeHtml(url)}</span></div>` : `<div style="margin-top:8px;color:var(--muted);font-size:13px;">${d.status === "building" ? "Building…" : "No deployed URL for this status."}</div>`}
-      </div>
-      <button class="btn btn-sm btn-outline" onclick="document.getElementById('deployment-detail-panel')?.remove()">Close</button>
-    </div>`;
-  panel.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 async function rollbackDeployment(id) {
@@ -472,7 +536,10 @@ async function deleteEnvVar(id, projectId) {
 
 window.viewProject = viewProject;
 window.openCommitInDashboard = openCommitInDashboard;
+window.openCommitDeployment = openCommitDeployment;
 window.showDeploymentDetail = showDeploymentDetail;
+window.renderDeploymentPage = renderDeploymentPage;
+window.setDepTab = setDepTab;
 window.deleteProject = deleteProject;
 window.viewDeployment = viewDeployment;
 window.rollbackDeployment = rollbackDeployment;
@@ -489,7 +556,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   document.getElementById("back-to-projects")?.addEventListener("click", () => navigateTo("projects"));
+  document.getElementById("dep-back")?.addEventListener("click", () => navigateTo("deployments"));
   document.getElementById("new-project-btn")?.addEventListener("click", () => navigateTo("projects"));
+  document.querySelectorAll(".dep-tab").forEach((btn) => btn.addEventListener("click", () => { if (!btn.disabled) setDepTab(btn.dataset.depTab); }));
 
   document.getElementById("show-import-git-modal")?.addEventListener("click", () => {
     document.getElementById("github-import-modal").classList.add("open");

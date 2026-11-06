@@ -401,7 +401,94 @@
         </div>
       </section>
 
-      <section id="section-domains" class="section">
+      <section id="section-deployment-detail" class="section dep-page">
+        <div class="dep-top">
+          <button class="btn btn-outline btn-sm" id="dep-back" type="button">← Deployments</button>
+          <div class="dep-title-wrap">
+            <h1 class="section-title dep-title" id="dep-id">Deployment</h1>
+            <div class="dep-sub" id="dep-subtitle"></div>
+          </div>
+          <div class="dep-top-actions">
+            <a class="btn btn-primary btn-sm" id="dep-visit" href="#" target="_blank" rel="noopener" style="display:none;">Visit</a>
+          </div>
+        </div>
+
+        <div class="dep-tabs" role="tablist">
+          <button class="dep-tab active" data-dep-tab="deployment" type="button">Deployment</button>
+          <button class="dep-tab" data-dep-tab="logs" type="button">Logs</button>
+          <button class="dep-tab" data-dep-tab="resources" type="button" disabled>Resources</button>
+          <button class="dep-tab" data-dep-tab="source" type="button">Source</button>
+          <button class="dep-tab" data-dep-tab="opengraph" type="button" disabled>Open Graph</button>
+        </div>
+
+        <div id="dep-tab-deployment" class="dep-tab-panel active">
+          <div class="dep-details-card">
+            <div class="dep-details-head">Deployment Details</div>
+            <div class="dep-details-grid">
+              <div class="dep-kv"><div class="k">Created</div><div class="v" id="dep-created">—</div></div>
+              <div class="dep-kv"><div class="k">Status</div><div class="v" id="dep-status">—</div></div>
+              <div class="dep-kv"><div class="k">Duration</div><div class="v" id="dep-duration">—</div></div>
+              <div class="dep-kv"><div class="k">Environment</div><div class="v" id="dep-env">—</div></div>
+              <div class="dep-kv dep-kv-wide"><div class="k">Domains</div><div class="v" id="dep-domains">—</div></div>
+              <div class="dep-kv dep-kv-wide"><div class="k">Source</div><div class="v" id="dep-source">—</div></div>
+            </div>
+          </div>
+
+          <div class="dep-sections">
+            <div class="dep-card">
+              <div class="dep-card-title">Deployment Settings</div>
+              <div class="dep-card-sub">Configuration for this deployment (local dashboard).</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Build Logs</div>
+              <div class="dep-card-sub" id="dep-build-summary">—</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Deployment Summary</div>
+              <div class="dep-rows" id="dep-summary-rows"></div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Deployment Checks</div>
+              <div class="dep-card-sub">No checks configured.</div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Assigning Custom Domains</div>
+              <div class="dep-card-sub">Custom domains are managed in the Domains tab (local-only reference).</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Runtime Logs</div>
+              <div class="dep-card-sub">View and debug runtime logs & errors</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Observability</div>
+              <div class="dep-card-sub">Monitor app health & performance</div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Speed Insights <span class="dep-pill">Not Enabled</span></div>
+              <div class="dep-card-sub">Performance metrics from real users</div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Web Analytics <span class="dep-pill">Not Enabled</span></div>
+              <div class="dep-card-sub">Analyze visitors & traffic in real-time</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="dep-tab-logs" class="dep-tab-panel" style="display:none;">
+          <div class="dep-card">
+            <div class="dep-card-title">Logs</div>
+            <pre class="dep-log-pre" id="dep-logs-content">Loading…</pre>
+          </div>
+        </div>
+
+        <div id="dep-tab-source" class="dep-tab-panel" style="display:none;">
+          <div class="dep-card">
+            <div class="dep-card-title">Source</div>
+            <div class="dep-rows" id="dep-source-rows"></div>
+          </div>
+        </div>
+      </section>
+
         <div class="domains-note domains-note-top" id="domains-note">Domains are stored locally for this workspace.</div>
         <div class="domains-layout">
           <aside class="domains-rail">

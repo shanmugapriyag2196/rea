@@ -51,6 +51,9 @@ function initSchema() {
       project_id TEXT NOT NULL,
       version INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
+      commit_sha TEXT,
+      branch TEXT,
+      environment TEXT DEFAULT 'production',
       url_path TEXT,
       artifact_path TEXT,
       file_count INTEGER DEFAULT 0,
@@ -133,6 +136,9 @@ function initSchema() {
   } catch (e) {
     // Column may already exist
   }
+  try { db.exec(`ALTER TABLE deployments ADD COLUMN commit_sha TEXT;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE deployments ADD COLUMN branch TEXT;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE deployments ADD COLUMN environment TEXT DEFAULT 'production';`); } catch (e) {}
 
   saveDb();
 }
@@ -233,15 +239,26 @@ function deleteProject(id) {
 
 // ---- Deployment operations ----
 
-function createDeployment(projectId, version, status = "pending") {
+function createDeployment(projectId, version, status = "pending", opts = {}) {
   const id = generateId();
   const ts = now();
+  const commitSha = opts.commitSha || opts.commit_sha || null;
+  const branch = opts.branch || null;
+  const environment = opts.environment || "production";
   run(
-    "INSERT INTO deployments (id, project_id, version, status, created_at) VALUES (?, ?, ?, ?, ?)",
-    [id, projectId, version, status, ts]
+    "INSERT INTO deployments (id, project_id, version, status, commit_sha, branch, environment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, projectId, version, status, commitSha, branch, environment, ts]
   );
   saveDb();
   return getDeploymentById(id);
+}
+
+function getDeploymentByCommit(projectId, commitSha) {
+  if (!projectId || !commitSha) return null;
+  return get(
+    "SELECT * FROM deployments WHERE project_id = ? AND commit_sha = ? ORDER BY created_at DESC LIMIT 1",
+    [projectId, commitSha]
+  );
 }
 
 function getDeploymentById(id) {
@@ -466,9 +483,13 @@ module.exports = {
   listDomains,
   verifyDomain,
   deleteDomain,
+  setProjectGitHub,
+  upsertCommit,
+  getCommitById,
   listCommits,
   listAllCommits,
   deleteCommits,
+  getDeploymentByCommit,
   now,
   generateId,
 };
