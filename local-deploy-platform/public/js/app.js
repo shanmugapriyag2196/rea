@@ -56,6 +56,10 @@ function navigateTo(sectionId) {
     if (s.id === `section-${sectionId}`) s.classList.add("active");
   });
 
+  // Reset scroll so content (e.g., Commits list) starts at the top
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  document.querySelector(".main")?.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+
   if (sectionId === "overview") loadOverview();
   if (sectionId === "projects") loadProjects();
   if (sectionId === "commits") loadAllCommitsPage();
@@ -343,6 +347,8 @@ async function loadProjectDetailCommits(projectId) {
           <td class="commit-date">${date}</td>
         </tr>`;
       }).join("");
+      window.scrollTo(0, 0);
+      document.getElementById("section-commits")?.scrollIntoView?.({ block: "start", behavior: "auto" });
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">Could not load commits</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
     }

@@ -170,12 +170,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--border-hover); }
 /* Hide old sidebar elements if present */
 .sidebar { display: none; }
 .sidebar-footer { display: none; }
-#section-commits .section-header { margin-bottom: 8px; }
+#section-commits .section-header { margin-bottom: 10px; }
 #section-commits #commits-page-wrap { margin-top: 0; }
 #section-commits .data-table { margin-top: 0; }
 
 /* Commits (Vercel-like) */
-#section-commits .commits-header { margin-bottom: 12px; }
+#section-commits .commits-header { margin-bottom: 10px; }
 #section-commits .commits-subtitle { margin-top: 2px; font-size: 13px; color: var(--muted); }
 #section-commits .commits-wrap {
   border: 1px solid var(--border);
@@ -232,7 +232,6 @@ input:focus, select:focus, textarea:focus { border-color: var(--border-hover); }
 }
 #section-commits .commits-empty-title { color: #fff; font-size: 14px; font-weight: 500; }
 #section-commits .commits-empty-text { color: var(--muted); font-size: 13px; margin-top: 4px; }
-#section-commits .section-header { margin-bottom: 24px; }
 
 /* Domains (rail layout) */
 #section-domains .domains-layout { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
@@ -249,3 +248,5 @@ input:focus, select:focus, textarea:focus { border-color: var(--border-hover); }
 #section-domains .domains-empty-text { color: var(--muted); font-size: 13px; margin-top: 4px; }
 @media (max-width: 900px) { #section-domains .domains-layout { grid-template-columns: 1fr; } }
 #section-domains .domains-note-top { margin: 0 0 10px; }
+#section-commits { padding-top: 0; }
+#section-commits .commits-wrap, #section-commits .table-wrap { margin-top: 0; }
