@@ -360,10 +360,23 @@
       </section>
 
       <section id="section-commits" class="section">
-        <div class="section-header" style="margin-bottom:8px;"><h1 class="section-title">Commits</h1></div>
-        <div id="commits-page-wrap" style="overflow:visible; margin-top:0;">
-          <table class="data-table" style="margin-top:0;">
-            <thead><tr><th>Project</th><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr></thead>
+        <div class="section-header commits-header">
+          <div>
+            <h1 class="section-title">Commits</h1>
+            <p class="section-subtitle commits-subtitle">Recent commits from imported Git repositories</p>
+          </div>
+        </div>
+        <div id="commits-page-wrap" class="commits-wrap">
+          <table class="data-table commits-table">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th>Commit</th>
+                <th>Message</th>
+                <th>Author</th>
+                <th>Date</th>
+              </tr>
+            </thead>
             <tbody id="commits-page-body"></tbody>
           </table>
         </div>

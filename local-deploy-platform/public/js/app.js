@@ -313,23 +313,32 @@ async function loadProjectDetailCommits(projectId) {
   async function loadAllCommitsPage() {
     const tbody = document.getElementById("commits-page-body");
     if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
     try {
       const data = await api("/commits");
       const commits = Array.isArray(data) ? data : data.commits || [];
       if (commits.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No commits found. Import a Git repository to see commits.</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">No commits yet</div><div class="commits-empty-text">Import a Git repository to fetch and display all commits, like Vercel.</div></div></td></tr>`;
         return;
       }
-      tbody.innerHTML = commits.map((c) => `
-        <tr>
-          <td>${escapeHtml(c.project_name || c.projectName || "")}</td>
-          <td><code>${(c.sha || "").slice(0, 7)}</code></td>
-          <td>${escapeHtml((c.message || "").split("\n")[0])}</td>
-          <td>${escapeHtml(c.author_name || c.authorName || "")}</td>
-          <td>${formatDate(c.author_date || c.authorDate || c.created_at)}</td>
-        </tr>`).join("");
+      tbody.innerHTML = commits.map((c) => {
+        const sha = (c.sha || "").toString();
+        const short = sha.slice(0, 7);
+        const msg = escapeHtml((c.message || "").split("\n")[0] || "—");
+        const author = escapeHtml(c.author_name || c.authorName || "—");
+        const project = escapeHtml(c.project_name || c.projectName || "—");
+        const date = formatDate(c.author_date || c.authorDate || c.created_at);
+        return `
+        <tr class="commit-row">
+          <td class="commit-project">${project}</td>
+          <td class="commit-sha"><span class="commit-pill" title="${escapeHtml(sha)}">${short || "—"}</span></td>
+          <td class="commit-message" title="${msg}">${msg}</td>
+          <td class="commit-author">${author}</td>
+          <td class="commit-date">${date}</td>
+        </tr>`;
+      }).join("");
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5" style="color:var(--danger);">${escapeHtml(err.message)}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">Could not load commits</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
     }
   }
 
