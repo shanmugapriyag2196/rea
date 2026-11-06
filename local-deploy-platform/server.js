@@ -1,7 +1,7 @@
 ﻿"use strict";
 
 const express = require("express");
-const { spawn, execSync } = require("child_process");
+const { spawn, spawnSync, execSync } = require("child_process");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -690,43 +690,19 @@ app.post("/api/projects/:projectId/github/sync", async (req, res) => {
   try {
     const { projectId } = req.params;
     const project = getProjectById(projectId);
-    if (!project) {
-      return res.status(404).json({ error: "Project not found" });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const repoDir = path.join(WORKSPACE_DIR, projectId, "repo");
+    if (!fs.existsSync(path.join(repoDir, ".git"))) {
+      return res.status(400).json({ error: "No cloned repository found for this project. Re-import the Git repository." });
     }
-
-    const { github_repo_url: repoUrl, github_token: token, github_branch: branch = "main" } = project;
-    if (!repoUrl || !token) {
-      return res.status(400).json({ error: "GitHub not connected for this project" });
+    const repoUrl = project.github_repo_url || "";
+    if (repoUrl) {
+      try { runGit(["fetch", "--all", "--prune"], repoDir); } catch {}
     }
-
-    // Extract owner/repo from URL
-    const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(\.git)?$/);
-    if (!match) {
-      return res.status(400).json({ error: "Invalid GitHub repository URL" });
-    }
-    const [, owner, repo] = match;
-
-    deleteCommits(projectId);
-
-    const { commits } = await fetchCommitsFromGitHub(owner, repo, token, branch);
-
-    for (const c of commits) {
-      upsertCommit(
-        projectId,
-        c.sha,
-        c.message,
-        c.authorName,
-        c.authorEmail,
-        c.authorDate,
-        c.url,
-        c.htmlUrl
-      );
-    }
-
+    const { commits, count } = syncProjectCommitsFromRepo(projectId, repoDir, repoUrl);
     const ts = now();
     run("UPDATE projects SET github_last_synced_at = ?, updated_at = ? WHERE id = ?", [ts, ts, projectId]);
-
-    res.json({ success: true, commits, count: commits.length });
+    res.json({ success: true, commits, count, commitCount: count });
   } catch (err) {
     res.status(500).json({ error: "Failed to sync commits", message: err.message });
   }
@@ -866,7 +842,68 @@ app.use("/deployments", (req, res, next) => {
   }
 });
 
-app.post("/api/projects/import-git", async (req, res) => {
+// ---------- Git import helpers ----------
+function runGit(args, cwd) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error((r.stderr || r.stdout || `git ${args.join(" ")} failed`).trim());
+  return (r.stdout || "").trim();
+}
+
+function parseGitLog(repoDir, limit) {
+  const args = ["log", "--pretty=format:%H%x09%s%x09%an%x09%ae%x09%aI"];
+  if (limit) args.push("-n", String(limit));
+  const out = runGit(args, repoDir);
+  if (!out) return [];
+  return out.split(/\r?\n/).filter(Boolean).map((line) => {
+    const [sha, message = "", authorName = "", authorEmail = "", authorDate = ""] = line.split("\t");
+    return { sha, message, authorName, authorEmail, authorDate };
+  });
+}
+
+function syncProjectCommitsFromRepo(projectId, repoDir, repoUrl) {
+  const commits = parseGitLog(repoDir);
+  let count = 0;
+  for (const c of commits) {
+    if (!c.sha) continue;
+    upsertCommit(
+      projectId,
+      c.sha,
+      c.message,
+      c.authorName,
+      c.authorEmail,
+      c.authorDate,
+      "",
+      `${String(repoUrl || "").replace(/\.git$/i, "")}/commit/${c.sha}`
+    );
+    count++;
+  }
+  return { commits, count };
+}
+
+app.post("/api/projects/:projectId/github/sync", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = getProjectById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const repoDir = path.join(WORKSPACE_DIR, projectId, "repo");
+    if (!fs.existsSync(path.join(repoDir, ".git"))) {
+      return res.status(400).json({ error: "No cloned repository found for this project. Re-import the Git repository." });
+    }
+    const repoUrl = project.github_repo_url || "";
+    if (repoUrl) {
+      try { runGit(["fetch", "--all", "--prune"], repoDir); } catch {}
+    }
+    const { commits, count } = syncProjectCommitsFromRepo(projectId, repoDir, repoUrl);
+    const ts = now();
+    run("UPDATE projects SET github_last_synced_at = ?, updated_at = ? WHERE id = ?", [ts, ts, projectId]);
+    res.json({ success: true, commits, count, commitCount: count });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to sync commits", message: err.message });
+  }
+});
+
+app.post("/api/projects/import-git", (req, res) => {
   try {
     const { repoUrl, projectName } = req.body;
 
@@ -887,71 +924,48 @@ app.post("/api/projects/import-git", async (req, res) => {
     fs.mkdirSync(projectWorkspace, { recursive: true });
 
     const repoDir = path.join(projectWorkspace, "repo");
-    const gitClone = spawn("git", ["clone", repoUrl, repoDir], { cwd: projectWorkspace });
+    const gitClone = spawn("git", ["clone", "--no-tags", repoUrl, repoDir], { cwd: projectWorkspace });
+    let cloneErr = "";
+    gitClone.stderr && gitClone.stderr.on("data", (d) => { cloneErr += d.toString(); });
 
-    gitClone.on("close", async (code) => {
+    gitClone.on("close", (code) => {
       if (code !== 0) {
-        deleteProject(project.id);
+        try { deleteProject(project.id); } catch {}
         return res.status(500).json({
           error: "Failed to clone repository",
           message: "Git clone failed. Check the URL and permissions.",
+          details: cloneErr.slice(-4000),
         });
       }
 
-      // Fetch all commits from the local cloned repo (like Vercel shows all commits)
-      let commits = [];
       try {
-        const logOutput = execSync("git log --pretty=format:%H%x09%s%x09%an%x09%ae%x09%ad --date=iso", {
-          cwd: repoDir,
-          encoding: "utf8",
-          maxBuffer: 10 * 1024 * 1024,
-        });
-
-        const lines = logOutput.trim().split("\n").filter((l) => l.length > 0);
-        commits = lines.map((line) => {
-          const parts = line.split("\t");
-          return {
-            sha: parts[0],
-            message: parts[1] || "",
-            authorName: parts[2] || "",
-            authorEmail: parts[3] || "",
-            authorDate: parts[4] || "",
-            url: "",
-            htmlUrl: `${repoUrl}/commit/${parts[0]}`,
-          };
-        });
-
-        // Store commits in database
-        for (const c of commits) {
-          upsertCommit(
-            project.id,
-            c.sha,
-            c.message,
-            c.authorName,
-            c.authorEmail,
-            c.authorDate,
-            c.url,
-            c.htmlUrl
-          );
-        }
-
-        // Mark project as GitHub-connected
+        const { commits, count } = syncProjectCommitsFromRepo(project.id, repoDir, repoUrl);
         setProjectGitHub(project.id, repoUrl, "", "main");
+        return res.status(201).json({
+          project: getProjectById(project.id) || project,
+          message: "Repository imported successfully",
+          path: repoDir,
+          commits,
+          count,
+          commitCount: count,
+        });
       } catch (gitErr) {
-        console.error("Failed to fetch git log:", gitErr.message);
+        console.error("Failed to fetch/store git commits:", gitErr.message);
+        try { setProjectGitHub(project.id, repoUrl, "", "main"); } catch {}
+        return res.status(201).json({
+          project: getProjectById(project.id) || project,
+          message: "Repository imported, but commits could not be loaded automatically.",
+          path: repoDir,
+          commits: [],
+          count: 0,
+          commitCount: 0,
+          warning: gitErr.message,
+        });
       }
-
-      res.status(201).json({
-        project,
-        message: "Repository imported successfully",
-        path: repoDir,
-        commits,
-        commitCount: commits.length,
-      });
     });
 
     gitClone.on("error", (err) => {
-      deleteProject(project.id);
+      try { deleteProject(project.id); } catch {}
       return res.status(500).json({
         error: "Failed to clone repository",
         message: err.message,
