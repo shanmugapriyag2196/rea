@@ -324,11 +324,14 @@ async function loadProjectDetailCommits(projectId) {
     const tbody = document.getElementById("commits-page-body");
     if (!tbody) return;
     tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
+    window.scrollTo(0, 0);
+    document.querySelector(".main")?.scrollTo?.(0, 0);
     try {
-      const data = await api("/commits");
+      const data = await api("/commits?limit=100");
       const commits = Array.isArray(data) ? data : data.commits || [];
       if (commits.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">No commits yet</div><div class="commits-empty-text">Import a Git repository to fetch and display all commits, like Vercel.</div></div></td></tr>`;
+        window.scrollTo(0, 0);
         return;
       }
       tbody.innerHTML = commits.map((c) => {
@@ -347,10 +350,10 @@ async function loadProjectDetailCommits(projectId) {
           <td class="commit-date">${date}</td>
         </tr>`;
       }).join("");
-      window.scrollTo(0, 0);
-      document.getElementById("section-commits")?.scrollIntoView?.({ block: "start", behavior: "auto" });
+      requestAnimationFrame(() => { window.scrollTo(0, 0); document.querySelector(".main")?.scrollTo?.(0, 0); });
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">Could not load commits</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
+      window.scrollTo(0, 0);
     }
   }
 
