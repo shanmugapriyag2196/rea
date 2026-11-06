@@ -402,32 +402,43 @@
       </section>
 
       <section id="section-domains" class="section">
-        <div class="section-header">
-          <h1 class="section-title">Domains</h1>
-          <p class="section-subtitle">Configure custom domains for your projects</p>
-        </div>
-        <div id="domains-list-wrap" class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Domain</th>
-                <th>Environment</th>
-                <th>Status</th>
-                <th>SSL</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="domains-table-body"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="domains-empty" style="display:none;">
-          <div class="empty-icon">&#128202;</div>
-          <h2>No custom domains</h2>
-          <p>Add a domain to your project.</p>
+        <div class="domains-layout">
+          <aside class="domains-rail">
+            <h1 class="section-title">Domains</h1>
+            <p class="domains-lead">Assign domains to projects. Local-only reference (no public DNS/SSL provisioning).</p>
+            <div class="domains-steps card">
+              <div class="domains-step"><span class="domains-step-n">1</span><span>Import or select a project</span></div>
+              <div class="domains-step"><span class="domains-step-n">2</span><span>Add a domain name</span></div>
+              <div class="domains-step"><span class="domains-step-n">3</span><span>Track verification status</span></div>
+            </div>
+          </aside>
+          <div class="domains-main">
+            <div class="domains-toolbar">
+              <div class="domains-toolbar-title">Configured domains</div>
+              <button class="btn btn-primary" id="open-add-domain" type="button" style="display:none;">Add Domain</button>
+            </div>
+            <div id="domains-list-wrap" class="table-wrap">
+              <table class="data-table domains-table">
+                <thead>
+                  <tr>
+                    <th>Project</th>
+                    <th>Domain</th>
+                    <th>Environment</th>
+                    <th>Status</th>
+                    <th>SSL</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="domains-table-body">
+                  <tr><td colspan="6" style="color:var(--muted);padding:20px;text-align:center;">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="domains-note" id="domains-note">Domains are stored locally for this workspace.</div>
+          </div>
         </div>
 
-        <!-- Add domain modal -->
+        <!-- Add domain modal (kept for compatibility) -->
         <div class="modal-overlay" id="add-domain-modal">
           <div class="modal">
             <div class="modal-header">

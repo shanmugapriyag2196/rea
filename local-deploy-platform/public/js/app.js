@@ -181,7 +181,7 @@ async function loadDomains() {
     for (const p of projects) {
       try {
         const data = await api(`/projects/${p.id}/domains`);
-        const domains = Array.isArray(data) ? data : [];
+        const domains = Array.isArray(data) ? data : data.domains || [];
         domains.forEach((d) => (d.projectName = p.name));
         allDomains.push(...domains);
       } catch {}
@@ -190,13 +190,19 @@ async function loadDomains() {
     const wrap = document.getElementById("domains-list-wrap");
     if (wrap) wrap.style.display = "block";
     if (tbody) {
-      tbody.innerHTML = allDomains.map((d) => `
-        <tr>
-          <td>${escapeHtml(d.projectName || "-")}</td>
-          <td>${escapeHtml(d.name)}</td>
-          <td>${statusBadge(d.verified ? "ready" : "pending")}</td>
-          <td><button class="btn btn-sm btn-outline" onclick="deleteDomain('${d.id}')">Delete</button></td>
-        </tr>`).join("") || '<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px;">No domains</td></tr>';
+      if (allDomains.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6"><div class="domains-empty"><div class="domains-empty-title">No domains configured</div><div class="domains-empty-text">Add a domain to a project to see it here. (Local-only reference.)</div></div></td></tr>`;
+      } else {
+        tbody.innerHTML = allDomains.map((d) => `
+          <tr>
+            <td>${escapeHtml(d.projectName || "-")}</td>
+            <td><code>${escapeHtml(d.name || d.domain || "-")}</code></td>
+            <td>${escapeHtml(d.environment || "production")}</td>
+            <td>${statusBadge(d.verified ? "ready" : "pending")}</td>
+            <td style="color:var(--muted);">—</td>
+            <td><button class="btn btn-sm btn-outline" onclick="deleteDomain('${d.id}')">Delete</button></td>
+          </tr>`).join("");
+      }
     }
   } catch (err) {
     showToast("Failed to load domains: " + err.message, "error");
