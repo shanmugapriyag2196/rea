@@ -360,14 +360,12 @@
       </section>
 
       <section id="section-commits" class="section">
-        <div class="section-header commits-header">
-          <div>
-            <h1 class="section-title">Commits</h1>
-            <p class="section-subtitle commits-subtitle">Recent commits from imported Git repositories</p>
-          </div>
+        <div class="section-header">
+          <h1 class="section-title">Commits</h1>
+          <p class="section-subtitle">Recent commits from imported Git repositories</p>
         </div>
-        <div id="commits-page-wrap" class="commits-wrap">
-          <table class="data-table commits-table">
+        <div id="commits-page-wrap" class="table-wrap">
+          <table class="data-table">
             <thead>
               <tr>
                 <th>Project</th>
@@ -377,7 +375,14 @@
                 <th>Date</th>
               </tr>
             </thead>
-            <tbody id="commits-page-body"></tbody>
+            <tbody id="commits-page-body">
+              <tr>
+                <td colspan="5" style="color:var(--muted); padding:24px; text-align:center;">
+                  <strong style="color:#fff; display:block; margin-bottom:4px;">No commits yet</strong>
+                  Import a Git repository to fetch and display all commits, like Vercel.
+                </td>
+              </tr>
+            </tbody>
           </table>
         </div>
       </section>
