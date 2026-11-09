@@ -797,11 +797,21 @@ app.post("/api/projects/:projectId/github/sync", async (req, res) => {
 app.get("/api/projects/:projectId/github/commits", (req, res) => {
   try {
     const { projectId } = req.params;
-    const { limit = 50 } = req.query;
-    const commits = listCommits(projectId, parseInt(limit, 10));
-    res.json({ commits });
+    const { limit } = req.query;
+    const commits = limit ? listCommits(projectId, parseInt(limit, 10)) : listCommits(projectId, 100000);
+    res.json({ commits, count: commits.length });
   } catch (err) {
     res.status(500).json({ error: "Failed to list commits", message: err.message });
+  }
+});
+
+app.get("/api/commits", (req, res) => {
+  try {
+    const { limit } = req.query;
+    const commits = limit ? listAllCommits(parseInt(limit, 10)) : listAllCommits();
+    res.json({ commits, count: commits.length });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list all commits", message: err.message });
   }
 });
 

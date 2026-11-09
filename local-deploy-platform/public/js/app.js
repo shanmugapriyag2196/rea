@@ -324,7 +324,7 @@ async function loadProjectDetailCommits(projectId) {
   const tbody = document.getElementById("project-detail-commits-body");
   if (!tbody) return;
   try {
-    const data = await api(`/projects/${projectId}/github/commits?limit=100`);
+    const data = await api(`/projects/${projectId}/github/commits`);
     const commits = data.commits || [];
     if (commits.length === 0) {
       tbody.innerHTML = '<tr><td colspan="4">No commits found</td></tr>';
@@ -349,8 +349,10 @@ async function loadProjectDetailCommits(projectId) {
     window.scrollTo(0, 0);
     document.querySelector(".main")?.scrollTo?.(0, 0);
     try {
-      const data = await api("/commits?limit=100");
+      const data = await api("/commits");
       const commits = Array.isArray(data) ? data : data.commits || [];
+      const subtitle = document.querySelector("#section-commits .section-subtitle");
+      if (subtitle) subtitle.textContent = commits.length ? `${commits.length} commits from imported Git repositories` : "Recent commits from imported Git repositories";
       if (commits.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">No commits yet</div><div class="commits-empty-text">Import a Git repository to fetch and display all commits, like Vercel.</div></div></td></tr>`;
         window.scrollTo(0, 0);
