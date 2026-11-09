@@ -1,7 +1,7 @@
-"use strict";
+﻿"use strict";
 
 const express = require("express");
-const { spawn, execSync } = require("child_process");
+const { spawn, spawnSync, execSync } = require("child_process");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
@@ -17,10 +17,13 @@ const {
   deleteProject,
   createDeployment,
   getDeploymentById,
+  getDeploymentByCommit,
   listDeployments,
   updateDeployment,
   getNextVersion,
   run,
+  get,
+  all,
   setEnvVar,
   listEnvVars,
   deleteEnvVar,
@@ -30,6 +33,7 @@ const {
   deleteDomain,
   setProjectGitHub,
   upsertCommit,
+  getCommitById,
   listCommits,
   listAllCommits,
   deleteCommits,
@@ -37,18 +41,27 @@ const {
   generateId,
 } = require("./database");
 
+const IS_VERCEL = !!process.env.VERCEL;
 const PORT = parseInt(process.env.PORT, 10) || 3456;
 const HOST = process.env.HOST || "127.0.0.1";
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || path.join(__dirname, "workspaces");
-const ARTIFACT_DIR = process.env.ARTIFACT_DIR || path.join(__dirname, "public", "deployments");
-const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, "logs");
+const TMP_BASE = process.env.TMPDIR || process.env.TEMP || "/tmp";
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || (IS_VERCEL ? path.join(TMP_BASE, "vg-workspaces") : path.join(__dirname, "workspaces"));
+const ARTIFACT_DIR = process.env.ARTIFACT_DIR || (IS_VERCEL ? path.join(TMP_BASE, "vg-deployments") : path.join(__dirname, "public", "deployments"));
+const LOG_DIR = process.env.LOG_DIR || (IS_VERCEL ? path.join(TMP_BASE, "vg-logs") : path.join(__dirname, "logs"));
 const BUILD_TIMEOUT_MS = parseInt(process.env.BUILD_TIMEOUT_MS, 10) || 300000;
 const BUILD_MAX_MEMORY_MB = parseInt(process.env.BUILD_MAX_MEMORY_MB, 10) || 512;
 
-for (const dir of [WORKSPACE_DIR, ARTIFACT_DIR, LOG_DIR]) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+function ensureWritableDir(dir) {
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
+    console.warn(`[vg-deploy] Could not create dir ${dir}: ${e.message}`);
   }
+}
+
+for (const dir of [WORKSPACE_DIR, ARTIFACT_DIR, LOG_DIR]) {
+  ensureWritableDir(dir);
 }
 
 async function fetchCommitsFromGitHub(owner, repo, token, branch = "main", perPage = 100) {
@@ -105,7 +118,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // Multer config for ZIP uploads
 const upload = multer({
-  dest: path.join(__dirname, "logs", "tmp-uploads"),
+  dest: tmpUploadDir,
   limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -118,10 +131,8 @@ const upload = multer({
 });
 
 // Ensure tmp upload dir exists
-const tmpUploadDir = path.join(__dirname, "logs", "tmp-uploads");
-if (!fs.existsSync(tmpUploadDir)) {
-  fs.mkdirSync(tmpUploadDir, { recursive: true });
-}
+const tmpUploadDir = IS_VERCEL ? path.join(TMP_BASE, "vg-tmp-uploads") : path.join(__dirname, "logs", "tmp-uploads");
+ensureWritableDir(tmpUploadDir);
 // ---------- Helpers ----------
 
 function isSafeZipEntry(entryName) {
@@ -476,9 +487,91 @@ app.get("/api/deployments/:deploymentId", (req, res) => {
     if (!deployment) {
       return res.status(404).json({ error: "Deployment not found" });
     }
-    res.json(deployment);
+    const project = getProjectById(deployment.project_id);
+    const domains = project ? listDomains(project.id) : [];
+    let commit = null;
+    if (deployment.commit_sha && project) {
+      commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, deployment.commit_sha]);
+    }
+    res.json({ ...deployment, project, domains, commit });
   } catch (err) {
     res.status(500).json({ error: "Failed to get deployment", message: err.message });
+  }
+});
+
+app.get("/api/projects/:projectId/commits/:sha/deployment", (req, res) => {
+  try {
+    const { projectId, sha } = req.params;
+    const project = getProjectById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const deployment = getDeploymentByCommit(projectId, sha);
+    const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [projectId, sha]);
+    res.json({ deployment, commit, project });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to resolve commit deployment", message: err.message });
+  }
+});
+
+function copyDir(src, dest) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    if (entry.name === ".git") continue;
+    const s = path.join(src, entry.name);
+    const d = path.join(dest, entry.name);
+    if (entry.isDirectory()) copyDir(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
+
+app.post("/api/projects/:projectId/deploy-commit", (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { sha, branch } = req.body || {};
+    if (!sha || typeof sha !== "string") return res.status(400).json({ error: "Commit SHA is required" });
+    const project = getProjectById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const repoDir = path.join(WORKSPACE_DIR, projectId, "repo");
+    if (!fs.existsSync(path.join(repoDir, ".git"))) {
+      return res.status(400).json({ error: "No cloned repository found for this project. Re-import the Git repository." });
+    }
+
+    const existing = getDeploymentByCommit(projectId, sha);
+    if (existing) return res.json({ deployment: existing, reused: true });
+
+    const version = getNextVersion(projectId);
+    const deployment = createDeployment(projectId, version, "building", { commitSha: sha, branch: branch || project.github_branch || "main", environment: "production" });
+    const deployArtifactDir = path.join(ARTIFACT_DIR, deployment.id);
+    fs.mkdirSync(deployArtifactDir, { recursive: true });
+    updateDeployment(deployment.id, { status: "building", build_started_at: now() });
+
+    try {
+      const tmpZip = path.join(LOG_DIR, `tmp-deploy-${deployment.id}.zip`);
+      try { fs.rmSync(tmpZip, { force: true }); } catch {}
+      const archive = spawnSync("git", ["-C", repoDir, "archive", "--format=zip", "-o", tmpZip, sha], { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+      if (archive.status !== 0 || !fs.existsSync(tmpZip)) throw new Error((archive.stderr || archive.stdout || "git archive failed").trim());
+      safeExtractZip(tmpZip, deployArtifactDir);
+      try { fs.rmSync(tmpZip, { force: true }); } catch {}
+
+      const { count: fileCount, totalSize } = countFilesAndSize(deployArtifactDir);
+      const updated = updateDeployment(deployment.id, {
+        status: "ready",
+        build_completed_at: now(),
+        build_duration_ms: Math.max(0, now() - (deployment.created_at || now())),
+        file_count: fileCount,
+        total_size: totalSize,
+        url_path: `/deployments/${deployment.id}`,
+        artifact_path: deployArtifactDir,
+        log_path: `/api/deployments/${deployment.id}/logs`,
+        error_message: null,
+      });
+      res.status(201).json({ deployment: updated, reused: false, url: `http://${HOST}:${PORT}/deployments/${updated.id}/` });
+    } catch (e) {
+      try { fs.rmSync(deployArtifactDir, { recursive: true, force: true }); } catch {}
+      updateDeployment(deployment.id, { status: "error", build_completed_at: now(), error_message: e.message });
+      res.status(422).json({ error: "Deploy from commit failed", message: e.message, deploymentId: deployment.id });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Failed to deploy commit", message: err.message });
   }
 });
 
@@ -690,43 +783,19 @@ app.post("/api/projects/:projectId/github/sync", async (req, res) => {
   try {
     const { projectId } = req.params;
     const project = getProjectById(projectId);
-    if (!project) {
-      return res.status(404).json({ error: "Project not found" });
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const repoDir = path.join(WORKSPACE_DIR, projectId, "repo");
+    if (!fs.existsSync(path.join(repoDir, ".git"))) {
+      return res.status(400).json({ error: "No cloned repository found for this project. Re-import the Git repository." });
     }
-
-    const { github_repo_url: repoUrl, github_token: token, github_branch: branch = "main" } = project;
-    if (!repoUrl || !token) {
-      return res.status(400).json({ error: "GitHub not connected for this project" });
+    const repoUrl = project.github_repo_url || "";
+    if (repoUrl) {
+      try { runGit(["fetch", "--all", "--prune"], repoDir); } catch {}
     }
-
-    // Extract owner/repo from URL
-    const match = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(\.git)?$/);
-    if (!match) {
-      return res.status(400).json({ error: "Invalid GitHub repository URL" });
-    }
-    const [, owner, repo] = match;
-
-    deleteCommits(projectId);
-
-    const { commits } = await fetchCommitsFromGitHub(owner, repo, token, branch);
-
-    for (const c of commits) {
-      upsertCommit(
-        projectId,
-        c.sha,
-        c.message,
-        c.authorName,
-        c.authorEmail,
-        c.authorDate,
-        c.url,
-        c.htmlUrl
-      );
-    }
-
+    const { commits, count } = syncProjectCommitsFromRepo(projectId, repoDir, repoUrl);
     const ts = now();
     run("UPDATE projects SET github_last_synced_at = ?, updated_at = ? WHERE id = ?", [ts, ts, projectId]);
-
-    res.json({ success: true, commits, count: commits.length });
+    res.json({ success: true, commits, count, commitCount: count });
   } catch (err) {
     res.status(500).json({ error: "Failed to sync commits", message: err.message });
   }
@@ -735,11 +804,21 @@ app.post("/api/projects/:projectId/github/sync", async (req, res) => {
 app.get("/api/projects/:projectId/github/commits", (req, res) => {
   try {
     const { projectId } = req.params;
-    const { limit = 50 } = req.query;
-    const commits = listCommits(projectId, parseInt(limit, 10));
-    res.json({ commits });
+    const { limit } = req.query;
+    const commits = limit ? listCommits(projectId, parseInt(limit, 10)) : listCommits(projectId, 100000);
+    res.json({ commits, count: commits.length });
   } catch (err) {
     res.status(500).json({ error: "Failed to list commits", message: err.message });
+  }
+});
+
+app.get("/api/commits", (req, res) => {
+  try {
+    const { limit } = req.query;
+    const commits = limit ? listAllCommits(parseInt(limit, 10)) : listAllCommits();
+    res.json({ commits, count: commits.length });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to list all commits", message: err.message });
   }
 });
 
@@ -792,8 +871,8 @@ app.get("/api/github/branches", async (req, res) => {
 
 app.get("/api/commits", (req, res) => {
   try {
-    const { limit = 100 } = req.query;
-    const commits = listAllCommits(parseInt(limit, 10));
+    const { limit } = req.query;
+    const commits = limit ? listAllCommits(parseInt(limit, 10)) : listAllCommits();
     res.json({ commits });
   } catch (err) {
     res.status(500).json({ error: "Failed to list all commits", message: err.message });
@@ -866,7 +945,68 @@ app.use("/deployments", (req, res, next) => {
   }
 });
 
-app.post("/api/projects/import-git", async (req, res) => {
+// ---------- Git import helpers ----------
+function runGit(args, cwd) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+  if (r.error) throw r.error;
+  if (r.status !== 0) throw new Error((r.stderr || r.stdout || `git ${args.join(" ")} failed`).trim());
+  return (r.stdout || "").trim();
+}
+
+function parseGitLog(repoDir, limit) {
+  const args = ["log", "--pretty=format:%H%x09%s%x09%an%x09%ae%x09%aI"];
+  if (limit) args.push("-n", String(limit));
+  const out = runGit(args, repoDir);
+  if (!out) return [];
+  return out.split(/\r?\n/).filter(Boolean).map((line) => {
+    const [sha, message = "", authorName = "", authorEmail = "", authorDate = ""] = line.split("\t");
+    return { sha, message, authorName, authorEmail, authorDate };
+  });
+}
+
+function syncProjectCommitsFromRepo(projectId, repoDir, repoUrl) {
+  const commits = parseGitLog(repoDir);
+  let count = 0;
+  for (const c of commits) {
+    if (!c.sha) continue;
+    upsertCommit(
+      projectId,
+      c.sha,
+      c.message,
+      c.authorName,
+      c.authorEmail,
+      c.authorDate,
+      "",
+      `${String(repoUrl || "").replace(/\.git$/i, "")}/commit/${c.sha}`
+    );
+    count++;
+  }
+  return { commits, count };
+}
+
+app.post("/api/projects/:projectId/github/sync", async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const project = getProjectById(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const repoDir = path.join(WORKSPACE_DIR, projectId, "repo");
+    if (!fs.existsSync(path.join(repoDir, ".git"))) {
+      return res.status(400).json({ error: "No cloned repository found for this project. Re-import the Git repository." });
+    }
+    const repoUrl = project.github_repo_url || "";
+    if (repoUrl) {
+      try { runGit(["fetch", "--all", "--prune"], repoDir); } catch {}
+    }
+    const { commits, count } = syncProjectCommitsFromRepo(projectId, repoDir, repoUrl);
+    const ts = now();
+    run("UPDATE projects SET github_last_synced_at = ?, updated_at = ? WHERE id = ?", [ts, ts, projectId]);
+    res.json({ success: true, commits, count, commitCount: count });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to sync commits", message: err.message });
+  }
+});
+
+app.post("/api/projects/import-git", (req, res) => {
   try {
     const { repoUrl, projectName } = req.body;
 
@@ -887,71 +1027,48 @@ app.post("/api/projects/import-git", async (req, res) => {
     fs.mkdirSync(projectWorkspace, { recursive: true });
 
     const repoDir = path.join(projectWorkspace, "repo");
-    const gitClone = spawn("git", ["clone", repoUrl, repoDir], { cwd: projectWorkspace });
+    const gitClone = spawn("git", ["clone", "--no-tags", repoUrl, repoDir], { cwd: projectWorkspace });
+    let cloneErr = "";
+    gitClone.stderr && gitClone.stderr.on("data", (d) => { cloneErr += d.toString(); });
 
-    gitClone.on("close", async (code) => {
+    gitClone.on("close", (code) => {
       if (code !== 0) {
-        deleteProject(project.id);
+        try { deleteProject(project.id); } catch {}
         return res.status(500).json({
           error: "Failed to clone repository",
           message: "Git clone failed. Check the URL and permissions.",
+          details: cloneErr.slice(-4000),
         });
       }
 
-      // Fetch all commits from the local cloned repo (like Vercel shows all commits)
-      let commits = [];
       try {
-        const logOutput = execSync("git log --pretty=format:%H%x09%s%x09%an%x09%ae%x09%ad --date=iso", {
-          cwd: repoDir,
-          encoding: "utf8",
-          maxBuffer: 10 * 1024 * 1024,
-        });
-
-        const lines = logOutput.trim().split("\n").filter((l) => l.length > 0);
-        commits = lines.map((line) => {
-          const parts = line.split("\t");
-          return {
-            sha: parts[0],
-            message: parts[1] || "",
-            authorName: parts[2] || "",
-            authorEmail: parts[3] || "",
-            authorDate: parts[4] || "",
-            url: "",
-            htmlUrl: `${repoUrl}/commit/${parts[0]}`,
-          };
-        });
-
-        // Store commits in database
-        for (const c of commits) {
-          upsertCommit(
-            project.id,
-            c.sha,
-            c.message,
-            c.authorName,
-            c.authorEmail,
-            c.authorDate,
-            c.url,
-            c.htmlUrl
-          );
-        }
-
-        // Mark project as GitHub-connected
+        const { commits, count } = syncProjectCommitsFromRepo(project.id, repoDir, repoUrl);
         setProjectGitHub(project.id, repoUrl, "", "main");
+        return res.status(201).json({
+          project: getProjectById(project.id) || project,
+          message: "Repository imported successfully",
+          path: repoDir,
+          commits,
+          count,
+          commitCount: count,
+        });
       } catch (gitErr) {
-        console.error("Failed to fetch git log:", gitErr.message);
+        console.error("Failed to fetch/store git commits:", gitErr.message);
+        try { setProjectGitHub(project.id, repoUrl, "", "main"); } catch {}
+        return res.status(201).json({
+          project: getProjectById(project.id) || project,
+          message: "Repository imported, but commits could not be loaded automatically.",
+          path: repoDir,
+          commits: [],
+          count: 0,
+          commitCount: 0,
+          warning: gitErr.message,
+        });
       }
-
-      res.status(201).json({
-        project,
-        message: "Repository imported successfully",
-        path: repoDir,
-        commits,
-        commitCount: commits.length,
-      });
     });
 
     gitClone.on("error", (err) => {
-      deleteProject(project.id);
+      try { deleteProject(project.id); } catch {}
       return res.status(500).json({
         error: "Failed to clone repository",
         message: err.message,
@@ -975,25 +1092,25 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error", message: err.message });
 });
 
+module.exports = app;
+
 // ---------- Start server after database initialization ----------
-initPromise.then(() => {
-  const server = app.listen(PORT, HOST, () => {
-    console.log(`VG Deployment App running at http://${HOST}:${PORT}/`);
-    console.log(`Bound to ${HOST}:${PORT} (local-only)`);
-  });
-
-  process.on("SIGTERM", () => {
-    server.close(() => {
-      process.exit(0);
+if (require.main === module) {
+  initPromise.then(() => {
+    const server = app.listen(PORT, HOST, () => {
+      console.log(`VG Deployment App running at http://${HOST}:${PORT}/`);
+      console.log(`Bound to ${HOST}:${PORT} (local-only)`);
     });
-  });
 
-  process.on("SIGINT", () => {
-    server.close(() => {
-      process.exit(0);
-    });
+    process.on("SIGTERM", () => server.close(() => process.exit(0)));
+    process.on("SIGINT", () => server.close(() => process.exit(0)));
+  }).catch((err) => {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
   });
-}).catch((err) => {
-  console.error("Failed to initialize database:", err);
-  process.exit(1);
-});
+} else {
+  // Serverless/runtime import (e.g. Vercel): don't exit; UI may still render, APIs depend on writable runtime.
+  initPromise.catch((err) => {
+    console.error("Database init failed (continuing in serverless mode):", err && err.message ? err.message : err);
+  });
+}

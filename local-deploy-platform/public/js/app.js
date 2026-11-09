@@ -1,48 +1,24 @@
-"use strict";
+﻿"use strict";
 
 const API_BASE = "/api";
-const HOST = window.location.hostname;
-const PORT = window.location.port;
-
-// ---------- State ----------
-let currentSection = "overview";
 let projects = [];
 let deployments = [];
 let currentProjectId = null;
 
-// ---------- DOM Elements ----------
-const sections = document.querySelectorAll(".section");
-const navLinks = document.querySelectorAll(".nav-link");
 const toast = document.getElementById("toast");
 
-// ---------- Utility Functions ----------
 function showToast(message, type = "info") {
+  if (!toast) return;
   toast.textContent = message;
   toast.className = `toast show ${type}`;
-  setTimeout(() => {
-    toast.className = "toast";
-  }, 4000);
+  setTimeout(() => (toast.className = "toast"), 4000);
 }
 
-function navigateTo(sectionId) {
-  currentSection = sectionId;
-  sections.forEach((s) => s.classList.remove("active"));
-  navLinks.forEach((l) => l.classList.remove("active"));
-
-  const section = document.getElementById(`section-${sectionId}`);
-  const link = document.querySelector(`[data-section="${sectionId}"]`);
-
-  if (section) section.classList.add("active");
-  if (link) link.classList.add("active");
-
-  // Section-specific initialization
-  if (sectionId === "projects") loadProjects();
-  if (sectionId === "commits") loadAllCommitsPage();
-  if (sectionId === "deployments") loadDeployments();
-  if (sectionId === "build-logs") loadBuildLogDeployments();
-  if (sectionId === "domains") loadDomains();
-  if (sectionId === "env") loadEnvProjects();
-  if (sectionId === "overview") loadOverview();
+function escapeHtml(text) {
+  if (!text) return "";
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function formatDate(ts) {
@@ -52,57 +28,59 @@ function formatDate(ts) {
 
 function formatDuration(ms) {
   if (!ms) return "-";
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(2)}s`;
+  return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
 }
 
 function statusBadge(status) {
-  const classes = {
-    ready: "status-ready",
-    building: "status-building",
-    error: "status-error",
-    pending: "status-pending",
-    canceled: "status-canceled",
-  };
-  const cls = classes[status] || "status-pending";
-  const label = status.charAt(0).toUpperCase() + status.slice(1);
-  return `<span class="status-badge ${cls}">${label}</span>`;
+  const labels = { ready: "Ready", building: "Building", error: "Error", pending: "Pending" };
+  return `<span class="status-badge status-${status || "pending"}">${labels[status] || status || "Pending"}</span>`;
 }
 
-// ---------- API Calls ----------
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.error || "Request failed");
-  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || data.message || "Request failed");
   return data;
 }
 
-// ---------- Overview ----------
+function navigateTo(sectionId) {
+  document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
+  document.querySelectorAll(".nav-link[data-section]").forEach((l) => l.classList.remove("active"));
+  document.getElementById(`section-${sectionId}`)?.classList.add("active");
+  document.querySelector(`[data-section="${sectionId}"]`)?.classList.add("active");
+  document.getElementById("project-detail").style.display = "none";
+  document.querySelectorAll(".section").forEach((s) => {
+    if (s.id === `section-${sectionId}`) s.classList.add("active");
+  });
+
+  // Reset scroll so content (e.g., Commits list) starts at the top
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+  document.querySelector(".main")?.scrollTo?.({ top: 0, left: 0, behavior: "auto" });
+
+  if (sectionId === "overview") loadOverview();
+  if (sectionId === "projects") loadProjects();
+  if (sectionId === "commits") loadAllCommitsPage();
+  if (sectionId === "deployments") loadDeployments();
+  if (sectionId === "domains") loadDomains();
+  if (sectionId === "env") loadEnvProjects();
+}
+
 async function loadOverview() {
   try {
-    const [projList, depList] = await Promise.all([
-      api("/projects"),
-      api("/deployments?projectId="), // will be filtered client-side since we don't have project filter yet
-    ]);
-
-    projects = projList;
-    // We need all deployments - fetch per project
-    const allDeployments = [];
+    projects = await api("/projects");
+    let allDeployments = [];
     for (const p of projects) {
       try {
-        const deps = await api(`/projects/${p.id}/deployments`);
+        const data = await api(`/projects/${p.id}/deployments`);
+        const deps = Array.isArray(data) ? data : data.deployments || [];
         deps.forEach((d) => (d.projectName = p.name));
         allDeployments.push(...deps);
-      } catch (e) {
-        // ignore per-project errors
-      }
+      } catch {}
     }
-    deployments = allDeployments.sort((a, b) => b.created_at - a.created_at);
+    deployments = allDeployments.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
 
     document.getElementById("stat-projects").textContent = projects.length;
     document.getElementById("stat-deployments").textContent = deployments.length;
@@ -114,360 +92,423 @@ async function loadOverview() {
     const tbody = document.getElementById("recent-deployments-body");
 
     if (projects.length === 0) {
-      empty.style.display = "flex";
-      recent.style.display = "none";
+      if (empty) empty.style.display = "flex";
+      if (recent) recent.style.display = "none";
     } else {
-      empty.style.display = "none";
-      recent.style.display = "block";
-      tbody.innerHTML = deployments
-        .slice(0, 5)
-        .map(
-          (d) => `
+      if (empty) empty.style.display = "none";
+      if (recent) recent.style.display = "block";
+      if (tbody) {
+        tbody.innerHTML = deployments.slice(0, 5).map((d) => `
           <tr>
-            <td>${escapeHtml(d.projectName)}</td>
-            <td>${d.version}</td>
+            <td>${escapeHtml(d.projectName || "-")}</td>
+            <td><code>${(d.commit_sha || d.version || "-").toString().slice(0, 7)}</code></td>
             <td>${statusBadge(d.status)}</td>
             <td>${formatDuration(d.build_duration_ms)}</td>
-            <td>
-              ${d.status === "ready" ? `<a href="http://${HOST}:${PORT}/deployments/${d.id}/" target="_blank" rel="noopener noreferrer">Open</a>` : "-"}
-            </td>
-            <td>
-              <button class="btn btn-outline btn-sm" onclick="viewDeployment('${d.id}')">View</button>
-            </td>
-          </tr>
-        `
-        )
-        .join("");
+            <td>${formatDate(d.created_at)}</td>
+            <td><button class="btn btn-sm btn-outline" onclick="viewDeployment('${d.id}')">View</button></td>
+          </tr>`).join("");
+      }
     }
   } catch (err) {
     showToast("Failed to load overview: " + err.message, "error");
   }
 }
 
-// ---------- Commits (all) ----------
-async function loadAllCommitsPage() {
-  const tbody = document.getElementById("commits-page-body");
-  const empty = document.getElementById("commits-page-empty");
-  const wrap = document.getElementById("commits-page-wrap");
-  if (!tbody) return;
-  try {
-    const data = await api("/commits?limit=200");
-    if (!data.commits || data.commits.length === 0) {
-      if (wrap) wrap.style.display = "none";
-      if (empty) empty.style.display = "flex";
-      return;
-    }
-    if (empty) empty.style.display = "none";
-    if (wrap) wrap.style.display = "block";
-    tbody.innerHTML = data.commits
-      .map(
-        (c) => `
-        <tr>
-          <td>${escapeHtml(c.project_name || "-")}</td>
-          <td><code>${c.sha.slice(0, 7)}</code></td>
-          <td>${escapeHtml(c.message)}</td>
-          <td>${escapeHtml(c.authorName)}</td>
-          <td>${c.authorDate ? new Date(c.authorDate).toLocaleString() : "-"}</td>
-          <td>
-            ${c.htmlUrl ? `<a href="${c.htmlUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">View</a>` : "-"}
-          </td>
-        </tr>
-      `
-      )
-      .join("");
-  } catch (err) {
-    showToast("Failed to load commits: " + err.message, "error");
-  }
-}
-
-// ---------- Projects ----------
 async function loadProjects() {
   try {
     projects = await api("/projects");
     const tbody = document.getElementById("projects-table-body");
     const empty = document.getElementById("projects-empty");
-    const listWrap = document.getElementById("projects-list");
-
+    const list = document.getElementById("projects-list");
     if (projects.length === 0) {
-      listWrap.style.display = "none";
-      empty.style.display = "flex";
+      if (list) list.style.display = "none";
+      if (empty) empty.style.display = "flex";
     } else {
-      listWrap.style.display = "block";
-      empty.style.display = "none";
-      tbody.innerHTML = projects
-        .map(
-          (p) => `
+      if (list) list.style.display = "block";
+      if (empty) empty.style.display = "none";
+      if (tbody) {
+        tbody.innerHTML = projects.map((p) => `
           <tr>
             <td>${escapeHtml(p.name)}</td>
-            <td>${p.framework}</td>
-            <td>-</td>
+            <td>${escapeHtml(p.framework || "static")}</td>
             <td>${formatDate(p.created_at)}</td>
             <td>
-              <button class="btn btn-outline btn-sm" onclick="viewProject('${p.id}')">View</button>
-              <button class="btn btn-outline btn-sm" onclick="deleteProject('${p.id}')">Delete</button>
+              <button class="btn btn-sm btn-outline" onclick="viewProject('${p.id}')">View</button>
+              <button class="btn btn-sm btn-outline" onclick="deleteProject('${p.id}')">Delete</button>
             </td>
-          </tr>
-        `
-        )
-        .join("");
+          </tr>`).join("");
+      }
     }
   } catch (err) {
     showToast("Failed to load projects: " + err.message, "error");
   }
 }
 
-async function createProjectFromForm(formData) {
-  try {
-    const project = await api("/projects", {
-      method: "POST",
-      body: JSON.stringify(formData),
-    });
-    closeModal("create-project-modal");
-    document.getElementById("create-project-form").reset();
-    showToast(`Project "${project.name}" created`, "success");
-    loadProjects();
-    loadOverview();
-    populateProjectSelects();
-  } catch (err) {
-    showToast(err.message, "error");
-  }
-}
-
-async function deleteProject(id) {
-  if (!confirm("Are you sure you want to delete this project? This will delete all its deployments.")) return;
-  try {
-    await api(`/projects/${id}`, { method: "DELETE" });
-    showToast("Project deleted", "success");
-    loadProjects();
-    loadOverview();
-    populateProjectSelects();
-  } catch (err) {
-    showToast(err.message, "error");
-  }
-}
-
-// ---------- Deployments ----------
 async function loadDeployments() {
   try {
-    const projectFilter = document.getElementById("deployment-project-filter").value;
-    const statusFilter = document.getElementById("deployment-status-filter").value;
-
     let allDeployments = [];
     for (const p of projects) {
       try {
-        const deps = await api(`/projects/${p.id}/deployments`);
+        const data = await api(`/projects/${p.id}/deployments`);
+        const deps = Array.isArray(data) ? data : data.deployments || [];
         deps.forEach((d) => (d.projectName = p.name));
         allDeployments.push(...deps);
-      } catch (e) {}
+      } catch {}
     }
-    deployments = allDeployments.sort((a, b) => b.created_at - a.created_at);
-
-    if (projectFilter) {
-      deployments = deployments.filter((d) => d.project_id === projectFilter);
-    }
-    if (statusFilter) {
-      deployments = deployments.filter((d) => d.status === statusFilter);
-    }
-
+    deployments = allDeployments.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
     const tbody = document.getElementById("deployments-table-body");
     const empty = document.getElementById("deployments-empty");
     const wrap = document.getElementById("deployments-table-wrap");
-
-    if (deployments.length === 0) {
-      wrap.style.display = "none";
-      empty.style.display = "flex";
-    } else {
-      wrap.style.display = "block";
-      empty.style.display = "none";
-      tbody.innerHTML = deployments
-        .map(
-          (d) => `
-          <tr>
-            <td>${escapeHtml(d.projectName)}</td>
-            <td>${d.version}</td>
-            <td>${statusBadge(d.status)}</td>
-            <td>${formatDuration(d.build_duration_ms)}</td>
-            <td>${d.file_count || 0}</td>
-            <td>${formatDate(d.created_at)}</td>
-            <td>
-              ${d.status === "ready"
-                ? `<a href="http://${HOST}:${PORT}/deployments/${d.id}/" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">Open</a>`
-                : "-"}
-              <button class="btn btn-outline btn-sm" onclick="viewDeployment('${d.id}')">Details</button>
-              ${d.status === "ready" ? `<button class="btn btn-outline btn-sm" onclick="rollbackDeployment('${d.id}')">Rollback</button>` : ""}
-            </td>
-          </tr>
-        `
-        )
-        .join("");
+    if (wrap) wrap.style.display = "block";
+    if (empty) empty.style.display = "none";
+    if (tbody) {
+      tbody.innerHTML = deployments.map((d) => `
+        <tr>
+          <td>${escapeHtml(d.projectName || "-")}</td>
+          <td>${statusBadge(d.status)}</td>
+          <td>${formatDuration(d.build_duration_ms)}</td>
+          <td>${formatDate(d.created_at)}</td>
+          <td>
+            ${d.status === "ready" ? `<a href="/deployments/${d.id}/" target="_blank" class="btn btn-sm btn-outline">Open</a>` : ""}
+            <button class="btn btn-sm btn-outline" onclick="rollbackDeployment('${d.id}')">Rollback</button>
+          </td>
+        </tr>`).join("") || '<tr><td colspan="5" style="color:var(--muted);text-align:center;padding:20px;">No deployments</td></tr>';
     }
-
-    populateProjectFilter();
   } catch (err) {
     showToast("Failed to load deployments: " + err.message, "error");
   }
 }
 
-async function populateProjectFilter() {
-  const select = document.getElementById("deployment-project-filter");
-  const current = select.value;
-  select.innerHTML = '<option value="">All Projects</option>';
+async function loadDomains() {
+  try {
+    let allDomains = [];
+    for (const p of projects) {
+      try {
+        const data = await api(`/projects/${p.id}/domains`);
+        const domains = Array.isArray(data) ? data : data.domains || [];
+        domains.forEach((d) => (d.projectName = p.name));
+        allDomains.push(...domains);
+      } catch {}
+    }
+    const tbody = document.getElementById("domains-table-body");
+    const wrap = document.getElementById("domains-list-wrap");
+    if (wrap) wrap.style.display = "block";
+    if (tbody) {
+      if (allDomains.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6"><div class="domains-empty"><div class="domains-empty-title">No domains configured</div><div class="domains-empty-text">Add a domain to a project to see it here. (Local-only reference.)</div></div></td></tr>`;
+      } else {
+        tbody.innerHTML = allDomains.map((d) => `
+          <tr>
+            <td>${escapeHtml(d.projectName || "-")}</td>
+            <td><code>${escapeHtml(d.name || d.domain || "-")}</code></td>
+            <td>${escapeHtml(d.environment || "production")}</td>
+            <td>${statusBadge(d.verified ? "ready" : "pending")}</td>
+            <td style="color:var(--muted);">—</td>
+            <td><button class="btn btn-sm btn-outline" onclick="deleteDomain('${d.id}')">Delete</button></td>
+          </tr>`).join("");
+      }
+    }
+  } catch (err) {
+    showToast("Failed to load domains: " + err.message, "error");
+  }
+}
+
+async function loadEnvProjects() {
+  const select = document.getElementById("env-project");
+  if (!select) return;
+  select.innerHTML = '<option value="">Select a project</option>';
   projects.forEach((p) => {
     const opt = document.createElement("option");
     opt.value = p.id;
     opt.textContent = p.name;
     select.appendChild(opt);
   });
-  select.value = current;
 }
 
-async function rollbackDeployment(id) {
-  if (!confirm("Roll back to this deployment? This will make it the active production deployment.")) return;
+async function loadEnvVars() {
+  const projectId = document.getElementById("env-project")?.value;
+  const env = document.getElementById("env-environment")?.value || "production";
+  const tbody = document.getElementById("env-table-body");
+  const empty = document.getElementById("env-empty");
+  const wrap = document.getElementById("env-table-wrap");
+  if (!projectId) {
+    if (wrap) wrap.style.display = "none";
+    if (empty) empty.style.display = "flex";
+    return;
+  }
   try {
-    const result = await api(`/deployments/${id}/rollback`, { method: "POST" });
-    showToast(result.message, "success");
-    loadDeployments();
+    const vars = await api(`/projects/${projectId}/env?environment=${env}`);
+    const list = Array.isArray(vars) ? vars : [];
+    if (list.length === 0) {
+      if (wrap) wrap.style.display = "none";
+      if (empty) empty.style.display = "flex";
+    } else {
+      if (wrap) wrap.style.display = "block";
+      if (empty) empty.style.display = "none";
+      if (tbody) {
+        tbody.innerHTML = list.map((v) => `
+          <tr>
+            <td><strong>${escapeHtml(v.key)}</strong></td>
+            <td>${escapeHtml(v.type)}</td>
+            <td><code>${escapeHtml(v.value)}</code></td>
+            <td><button class="btn btn-sm btn-outline" onclick="deleteEnvVar('${v.id}', '${projectId}')">Delete</button></td>
+          </tr>`).join("");
+      }
+    }
+  } catch (err) {
+    showToast("Failed to load env vars: " + err.message, "error");
+  }
+}
+
+function viewProject(id) {
+  const project = projects.find((p) => p.id === id);
+  if (!project) return showToast("Project not found", "error");
+  currentProjectId = id;
+  document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
+  document.querySelectorAll(".nav-link[data-section]").forEach((l) => l.classList.remove("active"));
+  document.querySelector('[data-section="projects"]')?.classList.add("active");
+  document.getElementById("project-detail").style.display = "block";
+  document.getElementById("project-detail-name").textContent = project.name;
+  document.getElementById("project-detail-description").textContent = project.description || "";
+  document.querySelectorAll(".tab-btn").forEach((b, i) => b.classList.toggle("active", b.dataset.tab ? b.dataset.tab === "deployments" : i === 0));
+  document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = tc.id === "tab-deployments" ? "block" : "none"));
+  loadProjectDeployments(id);
+  loadProjectDetailCommits(id);
+}
+
+function openCommitInDashboard(projectId, sha) {
+  if (!projectId) { showToast("No project for this commit", "error"); return; }
+  const project = projects.find((p) => p.id === projectId);
+  if (!project) {
+    // ensure projects loaded
+    api("/projects").then((list) => { projects = Array.isArray(list) ? list : list.projects || []; viewProject(projectId); setTimeout(() => focusProjectCommit(sha), 150); }).catch(() => showToast("Project not found", "error"));
+    return;
+  }
+  viewProject(projectId);
+  setTimeout(() => focusProjectCommit(sha), 150);
+}
+
+function focusProjectCommit(sha) {
+  // switch to commits tab in project detail
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === "commits"));
+  document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = tc.id === "tab-commits" ? "block" : "none"));
+  if (currentProjectId) loadProjectDetailCommits(currentProjectId, sha);
+}
+
+
+function loadProjectDeployments(projectId) {
+  const tbody = document.getElementById("project-deployments-table-body");
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="5">Loading...</td></tr>';
+  api(`/projects/${projectId}/deployments`).then((data) => {
+    const deps = Array.isArray(data) ? data : data.deployments || [];
+    if (deps.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5">No deployments yet</td></tr>';
+      return;
+    }
+    tbody.innerHTML = deps.map((d) => `
+      <tr>
+        <td>${statusBadge(d.status)}</td>
+        <td>${formatDate(d.created_at)}</td>
+        <td>
+          ${d.status === "ready" ? `<a href="/deployments/${d.id}/" target="_blank" class="btn btn-sm btn-outline">Open</a>` : ""}
+          <button class="btn btn-sm btn-outline" onclick="rollbackDeployment('${d.id}')">Rollback</button>
+        </td>
+      </tr>`).join("");
+  }).catch((e) => {
+    tbody.innerHTML = `<tr><td colspan="5">Error: ${escapeHtml(e.message)}</td></tr>`;
+  });
+}
+
+async function loadProjectDetailCommits(projectId) {
+  const tbody = document.getElementById("project-detail-commits-body");
+  if (!tbody) return;
+  try {
+    const data = await api(`/projects/${projectId}/github/commits`);
+    const commits = data.commits || [];
+    if (commits.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4">No commits found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = commits.map((c) => `
+      <tr>
+        <td><code>${c.sha.slice(0, 7)}</code></td>
+        <td>${escapeHtml((c.message || "").split("\n")[0])}</td>
+        <td>${escapeHtml(c.authorName || "")}</td>
+        <td>${formatDate(c.authorDate || c.created_at)}</td>
+      </tr>`).join("");
+  } catch {
+    tbody.innerHTML = '<tr><td colspan="4">No commits available</td></tr>';
+  }
+}
+
+  async function loadAllCommitsPage() {
+    const tbody = document.getElementById("commits-page-body");
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
+    window.scrollTo(0, 0);
+    document.querySelector(".main")?.scrollTo?.(0, 0);
+    try {
+      const data = await api("/commits");
+      const commits = Array.isArray(data) ? data : data.commits || [];
+      const subtitle = document.querySelector("#section-commits .section-subtitle");
+      if (subtitle) subtitle.textContent = commits.length ? `${commits.length} commits from imported Git repositories` : "Recent commits from imported Git repositories";
+      if (commits.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">No commits yet</div><div class="commits-empty-text">Import a Git repository to fetch and display all commits, like Vercel.</div></div></td></tr>`;
+        window.scrollTo(0, 0);
+        return;
+      }
+      tbody.innerHTML = commits.map((c) => {
+        const sha = (c.sha || "").toString();
+        const short = sha.slice(0, 7);
+        const msg = escapeHtml((c.message || "").split("\n")[0] || "—");
+        const author = escapeHtml(c.author_name || c.authorName || "—");
+        const project = escapeHtml(c.project_name || c.projectName || "—");
+        const projectId = c.project_id || c.projectId || "";
+        const date = formatDate(c.author_date || c.authorDate || c.created_at);
+        return `
+        <tr class="commit-row" data-project-id="${escapeHtml(projectId)}" data-sha="${escapeHtml(sha)}">
+          <td class="commit-project">${project}</td>
+          <td class="commit-sha"><button type="button" class="commit-pill commit-link" onclick="openCommitDeployment('${escapeHtml(projectId)}','${escapeHtml(sha)}')" title="Open deployment page">${short || "—"}</button></td>
+          <td class="commit-message commit-open-deploy" title="${msg}" onclick="openCommitDeployment('${escapeHtml(projectId)}','${escapeHtml(sha)}')">${msg}</td>
+          <td class="commit-author">${author}</td>
+          <td class="commit-date">${date}</td>
+        </tr>`;
+      }).join("");
+      requestAnimationFrame(() => { window.scrollTo(0, 0); document.querySelector(".main")?.scrollTo?.(0, 0); });
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">Could not load commits</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
+      window.scrollTo(0, 0);
+    }
+  }
+
+  async function deleteProject(id) {
+  if (!confirm("Delete this project?")) return;
+  try {
+    await api(`/projects/${id}`, { method: "DELETE" });
+    showToast("Project deleted", "success");
+    loadProjects();
     loadOverview();
   } catch (err) {
     showToast(err.message, "error");
   }
 }
 
+let _currentDeploymentId = null;
+
+function setDepTab(tab) {
+  document.querySelectorAll(".dep-tab").forEach((b) => b.classList.toggle("active", b.dataset.depTab === tab));
+  ["deployment","logs","resources","source","opengraph"].forEach((t) => {
+    const p = document.getElementById(`dep-tab-${t}`);
+    if (p) p.style.display = t === tab ? "block" : "none";
+  });
+  if (tab === "logs") loadDeploymentLogsForPage();
+}
+
+async function loadDeploymentLogsForPage() {
+  const el = document.getElementById("dep-logs-content");
+  if (!el || !_currentDeploymentId) return;
+  try {
+    const data = await api(`/deployments/${_currentDeploymentId}/logs`);
+    el.textContent = data.logs || "(no logs)";
+  } catch (e) { el.textContent = "Failed to load logs: " + e.message; }
+}
+
 async function viewDeployment(id) {
-  const d = await api(`/deployments/${id}`);
-  alert(
-    `Deployment Details\n\nID: ${d.id}\nProject: ${d.project_id}\nVersion: ${d.version}\nStatus: ${d.status}\nURL: http://${HOST}:${PORT}/deployments/${d.id}/\nCreated: ${formatDate(d.created_at)}\nDuration: ${formatDuration(d.build_duration_ms)}\nFiles: ${d.file_count || 0}\nError: ${d.error_message || "None"}`
-  );
-}
-
-// ---------- Build Logs ----------
-async function loadBuildLogDeployments() {
-  const select = document.getElementById("build-log-deployment");
-  select.innerHTML = '<option value="">Select a deployment</option>';
-
-  for (const p of projects) {
-    try {
-      const deps = await api(`/projects/${p.id}/deployments`);
-      deps.forEach((d) => {
-        d.projectName = p.name;
-        const opt = document.createElement("option");
-        opt.value = d.id;
-        opt.textContent = `${p.name} v${d.version} (${d.status})`;
-        select.appendChild(opt);
-      });
-    } catch (e) {}
-  }
-}
-
-async function loadBuildLogs() {
-  const select = document.getElementById("build-log-deployment");
-  const deploymentId = select.value;
-  const content = document.getElementById("build-log-content");
-  const empty = document.getElementById("build-logs-empty");
-  const container = document.getElementById("log-container");
-
-  if (!deploymentId) {
-    content.textContent = "Select a deployment to view its logs.";
-    container.style.display = "none";
-    empty.style.display = "flex";
-    return;
-  }
-
   try {
-    const { logs } = await api(`/deployments/${deploymentId}/logs`);
-    container.style.display = "block";
-    empty.style.display = "none";
-
-    // Colorize log lines
-    const lines = logs.split("\n");
-    const colored = lines
-      .map((line) => {
-        if (line.toLowerCase().includes("error") || line.toLowerCase().includes("fail")) {
-          return `<span class="log-line-error">${escapeHtml(line)}</span>`;
-        }
-        if (line.toLowerCase().includes("warn")) {
-          return `<span class="log-line-warn">${escapeHtml(line)}</span>`;
-        }
-        if (line.toLowerCase().includes("success") || line.toLowerCase().includes("completed")) {
-          return `<span class="log-line-info">${escapeHtml(line)}</span>`;
-        }
-        return escapeHtml(line);
-      })
-      .join("\n");
-
-    content.innerHTML = colored;
-    content.scrollTop = content.scrollHeight;
-  } catch (err) {
-    content.textContent = "Failed to load logs: " + err.message;
-  }
-}
-
-// ---------- Domains ----------
-async function loadDomains() {
-  try {
-    let allDomains = [];
-    for (const p of projects) {
-      try {
-        const deps = await api(`/projects/${p.id}/domains`);
-        deps.forEach((d) => (d.projectName = p.name));
-        allDomains.push(...deps);
-      } catch (e) {}
-    }
-
-    const tbody = document.getElementById("domains-table-body");
-    const empty = document.getElementById("domains-empty");
-    const wrap = document.getElementById("domains-list-wrap");
-
-    if (allDomains.length === 0) {
-      wrap.style.display = "none";
-      empty.style.display = "flex";
-    } else {
-      wrap.style.display = "block";
-      empty.style.display = "none";
-      tbody.innerHTML = allDomains
-        .map(
-          (d) => `
-          <tr>
-            <td>${escapeHtml(d.projectName)}</td>
-            <td>${escapeHtml(d.name)}</td>
-            <td>${d.environment}</td>
-            <td>${statusBadge(d.verified ? "ready" : "pending")}</td>
-            <td>${d.ssl_status}</td>
-            <td>
-              <button class="btn btn-outline btn-sm" onclick="deleteDomain('${d.id}')">Delete</button>
-            </td>
-          </tr>
-        `
-        )
-        .join("");
-    }
-
-    populateDomainProjectSelect();
-  } catch (err) {
-    showToast("Failed to load domains: " + err.message, "error");
-  }
-}
-
-async function addDomainFromForm(formData) {
-  try {
-    const domain = await api(`/projects/${formData.projectId}/domains`, {
-      method: "POST",
-      body: JSON.stringify({ name: formData.name, environment: formData.environment }),
-    });
-    closeModal("add-domain-modal");
-    document.getElementById("add-domain-form").reset();
-    showToast(`Domain "${domain.name}" added`, "success");
-    loadDomains();
+    const d = await api(`/deployments/${id}`);
+    _currentDeploymentId = d && d.id ? d.id : id;
+    renderDeploymentPage(d);
   } catch (err) {
     showToast(err.message, "error");
   }
 }
 
-async function verifyDomain(id) {
+function showDeploymentDetail(d) { renderDeploymentPage(d); }
+
+function renderDeploymentPage(d) {
+  _currentDeploymentId = d && d.id ? d.id : _currentDeploymentId;
+  document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
+  document.querySelectorAll(".nav-link[data-section]").forEach((l) => l.classList.remove("active"));
+  const pd = document.getElementById("project-detail"); if (pd) pd.style.display = "none";
+  const sec = document.getElementById("section-deployment-detail");
+  if (!sec) { navigateTo("deployments"); return; }
+  sec.classList.add("active");
+  window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+
+  const project = d.project || projects.find((p) => p.id === d.project_id) || {};
+  const sha = (d.commit_sha || "").toString();
+  const short = sha ? sha.slice(0,7) : (d.id || "").slice(0,8);
+  const status = d.status || "pending";
+  const url = status === "ready" ? `${location.origin}/deployments/${d.id}/` : "";
+  const branch = d.branch || project.github_branch || "main";
+  const domains = Array.isArray(d.domains) ? d.domains : [];
+
+  const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  const txt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  txt("dep-id", short);
+  set("dep-subtitle", `Project Deployments · ${escapeHtml(project.name || "Project")}`);
+  const visit = document.getElementById("dep-visit");
+  if (visit) { visit.style.display = url ? "inline-flex" : "none"; if (url) visit.href = url; }
+
+  txt("dep-created", d.created_at ? new Date(d.created_at).toLocaleString() : "—");
+  set("dep-status", `${statusBadge(status)}${status === "ready" ? ' <span style="color:var(--muted);font-size:12px;margin-left:6px;">Current</span>' : ''}`);
+  txt("dep-duration", formatDuration(d.build_duration_ms));
+  set("dep-env", `<strong style="color:#fff;">${escapeHtml((d.environment || "production").replace(/^./, c=>c.toUpperCase()))}</strong>${status === "ready" ? ' <span class="dep-pill">Current</span>' : ''}`);
+  set("dep-domains", domains.length ? domains.map(x => `<div><span style="color:#fff;">${escapeHtml(x.name || x.domain)}</span></div>`).join("") : (url ? `<a href="${url}" target="_blank" rel="noopener" style="color:#fff;">${escapeHtml(location.host)}/deployments/${escapeHtml(d.id)}/</a>` : '<span style="color:var(--muted);">No domain</span>'));
+  set("dep-source", `<div><span class="dep-pill">${escapeHtml(branch)}</span></div><div style="margin-top:6px;"><code>${escapeHtml(short)}</code> ${d.commit?.message ? `<span style="color:#ccc;">${escapeHtml((d.commit.message||'').split('\n')[0])}</span>` : ''}</div>`);
+
+  txt("dep-build-summary", status === "ready" ? `Build completed in ${formatDuration(d.build_duration_ms)} · ${d.file_count || 0} files` : (d.error_message ? d.error_message : "—"));
+  set("dep-summary-rows", [
+    ["Project", escapeHtml(project.name || "—")],
+    ["Deployment ID", `<code>${escapeHtml(d.id || '')}</code>`],
+    ["Commit", sha ? `<code>${escapeHtml(short)}</code>` : "—"],
+    ["Branch", escapeHtml(branch)],
+    ["Files", escapeHtml(String(d.file_count ?? "—"))],
+    ["Total size", d.total_size ? escapeHtml((d.total_size/1024).toFixed(1) + " KB") : "—"],
+  ].map(([k,v]) => `<div class="dep-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join(""));
+  set("dep-source-rows", [
+    ["Repository", escapeHtml(project.github_repo_url || "—")],
+    ["Branch", escapeHtml(branch)],
+    ["Commit", sha ? `<code>${escapeHtml(sha)}</code>` : "—"],
+    ["Author", escapeHtml(d.commit?.author_name || "—")],
+    ["Date", escapeHtml(d.commit?.author_date || "—")],
+  ].map(([k,v]) => `<div class="dep-row"><span class="k">${k}</span><span class="v">${v}</span></div>`).join(""));
+
+  const logs = document.getElementById("dep-logs-content");
+  if (logs) logs.textContent = "Loading…";
+  setDepTab("deployment");
+}
+
+async function openCommitDeployment(projectId, sha) {
+  if (!projectId || !sha) return showToast("Missing project/commit", "error");
   try {
-    await api(`/domains/${id}/verify`, { method: "POST" });
-    showToast("Domain verified", "success");
-    loadDomains();
+    showToast(`Opening deployment for ${sha.slice(0,7)}…`, "info");
+    if (!projects.length) { try { projects = await api("/projects"); } catch {} }
+    const data = await api(`/projects/${projectId}/commits/${encodeURIComponent(sha)}/deployment`);
+    let dep = data && data.deployment;
+    if (!dep) {
+      showToast(`Creating deployment for ${sha.slice(0,7)}…`, "info");
+      const created = await api(`/projects/${projectId}/deploy-commit`, { method: "POST", body: JSON.stringify({ sha }) });
+      dep = created.deployment;
+      if (!dep) throw new Error(created.error || "Deployment was not created");
+    }
+    _currentDeploymentId = dep.id;
+    const full = await api(`/deployments/${dep.id}`);
+    if (full && !full.commit && data.commit) full.commit = data.commit;
+    renderDeploymentPage(full);
+  } catch (err) {
+    showToast(err.message, "error");
+  }
+}
+
+async function rollbackDeployment(id) {
+  if (!confirm("Rollback to this deployment?")) return;
+  try {
+    await api(`/deployments/${id}/rollback`, { method: "POST" });
+    showToast("Rollback successful", "success");
+    loadDeployments();
+    if (currentProjectId) loadProjectDeployments(currentProjectId);
   } catch (err) {
     showToast(err.message, "error");
   }
@@ -484,103 +525,10 @@ async function deleteDomain(id) {
   }
 }
 
-async function populateDomainProjectSelect() {
-  const select = document.getElementById("domain-project");
-  select.innerHTML = "";
-  projects.forEach((p) => {
-    const opt = document.createElement("option");
-    opt.value = p.id;
-    opt.textContent = p.name;
-    select.appendChild(opt);
-  });
-}
-
-// ---------- Environment Variables ----------
-async function loadEnvProjects() {
-  const select = document.getElementById("env-project");
-  select.innerHTML = '<option value="">Select a project</option>';
-  projects.forEach((p) => {
-    const opt = document.createElement("option");
-    opt.value = p.id;
-    opt.textContent = p.name;
-    select.appendChild(opt);
-  });
-}
-
-async function loadEnvVars() {
-  const projectSelect = document.getElementById("env-project");
-  const envSelect = document.getElementById("env-environment");
-  const projectId = projectSelect.value;
-  const environment = envSelect.value;
-
-  const tbody = document.getElementById("env-table-body");
-  const empty = document.getElementById("env-empty");
-  const wrap = document.getElementById("env-table-wrap");
-
-  if (!projectId) {
-    wrap.style.display = "none";
-    empty.style.display = "flex";
-    empty.querySelector("h2").textContent = "Select a project";
-    empty.querySelector("p").textContent = "Choose a project to view its environment variables.";
-    return;
-  }
-
+async function deleteEnvVar(id, projectId) {
+  if (!confirm("Delete this variable?")) return;
   try {
-    const vars = await api(`/projects/${projectId}/env?environment=${environment}`);
-
-    if (vars.length === 0) {
-      wrap.style.display = "none";
-      empty.style.display = "flex";
-      empty.querySelector("h2").textContent = "No environment variables";
-      empty.querySelector("p").textContent = `No environment variables for ${environment} environment.`;
-    } else {
-      wrap.style.display = "block";
-      empty.style.display = "none";
-      tbody.innerHTML = vars
-        .map(
-          (v) => `
-          <tr>
-            <td><strong>${escapeHtml(v.key)}</strong></td>
-            <td><span class="status-badge ${v.type === "secret" ? "status-error" : "status-ready"}">${v.type}</span></td>
-            <td>${v.environment}</td>
-            <td><code style="background:#f1f5f9;padding:2px 6px;border-radius:4px;">${escapeHtml(v.value)}</code></td>
-            <td>
-              <button class="btn btn-outline btn-sm" onclick="deleteEnvVar('${v.id}')">Delete</button>
-            </td>
-          </tr>
-        `
-        )
-        .join("");
-    }
-  } catch (err) {
-    showToast("Failed to load environment variables: " + err.message, "error");
-  }
-}
-
-async function addEnvVarFromForm(formData) {
-  try {
-    const variable = await api(`/projects/${formData.projectId}/env`, {
-      method: "POST",
-      body: JSON.stringify({
-        key: formData.key,
-        value: formData.value,
-        type: formData.type,
-        environment: formData.environment,
-      }),
-    });
-    closeModal("add-env-modal");
-    document.getElementById("add-env-form").reset();
-    showToast(`Variable "${variable.key}" saved`, "success");
-    loadEnvVars();
-  } catch (err) {
-    showToast(err.message, "error");
-  }
-}
-
-async function deleteEnvVar(id) {
-  if (!confirm("Delete this environment variable?")) return;
-  try {
-    await api(`/projects/placeholder/env/${id}`, { method: "DELETE" });
+    await api(`/projects/${projectId}/env/${id}`, { method: "DELETE" });
     showToast("Variable deleted", "success");
     loadEnvVars();
   } catch (err) {
@@ -588,561 +536,135 @@ async function deleteEnvVar(id) {
   }
 }
 
-// ---------- Helpers ----------
-function escapeHtml(text) {
-  if (!text) return "";
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
+window.viewProject = viewProject;
+window.openCommitInDashboard = openCommitInDashboard;
+window.openCommitDeployment = openCommitDeployment;
+window.showDeploymentDetail = showDeploymentDetail;
+window.renderDeploymentPage = renderDeploymentPage;
+window.setDepTab = setDepTab;
+window.deleteProject = deleteProject;
+window.viewDeployment = viewDeployment;
+window.rollbackDeployment = rollbackDeployment;
+window.deleteDomain = deleteDomain;
+window.deleteEnvVar = deleteEnvVar;
+window.loadProjectDetailCommits = loadProjectDetailCommits;
 
-function openModal(modalId) {
-  document.getElementById(modalId).classList.add("open");
-}
-
-function closeModal(modalId) {
-  document.getElementById(modalId).classList.remove("open");
-}
-
-function populateProjectSelects() {
-  const domainSelect = document.getElementById("domain-project");
-  const envSelect = document.getElementById("env-project");
-  const currentDomain = domainSelect.value;
-  const currentEnv = envSelect.value;
-
-  domainSelect.innerHTML = "";
-  envSelect.innerHTML = '<option value="">Select a project</option>';
-
-  projects.forEach((p) => {
-    const dOpt = document.createElement("option");
-    dOpt.value = p.id;
-    dOpt.textContent = p.name;
-    domainSelect.appendChild(dOpt);
-
-    const eOpt = document.createElement("option");
-    eOpt.value = p.id;
-    eOpt.textContent = p.name;
-    envSelect.appendChild(eOpt);
+document.addEventListener("DOMContentLoaded", () => {
+  document.querySelectorAll(".nav-link[data-section]").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      navigateTo(link.dataset.section);
+    });
   });
 
-  domainSelect.value = currentDomain;
-  envSelect.value = currentEnv;
-}
+  document.getElementById("back-to-projects")?.addEventListener("click", () => navigateTo("projects"));
+  document.getElementById("dep-back")?.addEventListener("click", () => navigateTo("deployments"));
+  document.getElementById("new-project-btn")?.addEventListener("click", () => navigateTo("projects"));
+  document.querySelectorAll(".dep-tab").forEach((btn) => btn.addEventListener("click", () => { if (!btn.disabled) setDepTab(btn.dataset.depTab); }));
 
-// ---------- Event Listeners ----------
-document.addEventListener("DOMContentLoaded", () => {
-  // Vercel-style GitHub import modal
-  document.getElementById("show-import-git-modal").addEventListener("click", () => {
+  document.getElementById("show-import-git-modal")?.addEventListener("click", () => {
     document.getElementById("github-import-modal").classList.add("open");
   });
-  document.getElementById("close-github-import").addEventListener("click", () => {
+  document.getElementById("close-github-import")?.addEventListener("click", () => {
     document.getElementById("github-import-modal").classList.remove("open");
   });
 
-  let selectedRepo = null;
-  document.getElementById("load-github-repos").addEventListener("click", async () => {
+  document.getElementById("load-github-repos")?.addEventListener("click", async () => {
     const token = document.getElementById("github-token-input").value;
-    if (!token) {
-      showToast("Enter GitHub token", "error");
-      return;
-    }
+    if (!token) return showToast("Enter GitHub token", "error");
     localStorage.setItem("github_token", token);
     document.getElementById("github-repos-list").style.display = "block";
     document.getElementById("github-repos-loading").style.display = "block";
     document.getElementById("github-repos-items").style.display = "none";
     try {
-      const res = await fetch(`${API_BASE}/github/repos`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`${API_BASE}/github/repos`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       document.getElementById("github-repos-loading").style.display = "none";
       document.getElementById("github-repos-items").style.display = "block";
-      document.getElementById("github-repos-items").innerHTML = (data.repos || [])
-        .map(
-          (r) => `
-          <div style="padding: 0.75rem; border-bottom: 1px solid #f1f5f9; cursor: pointer;" onclick="selectGitRepo('${r.full_name}', '${r.default_branch}')">
-            <div style="font-weight: 500;">${escapeHtml(r.full_name)}</div>
-            <div style="font-size: 0.875rem; color: #64748b;">${escapeHtml(r.description || "")}</div>
-          </div>
-        `
-        )
-        .join("");
+      document.getElementById("github-repos-items").innerHTML = (data.repos || []).map((r) => `
+        <div style="padding:10px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="window._selRepo('${r.full_name}')">
+          <div style="font-weight:500;">${escapeHtml(r.full_name)}</div>
+          <div style="font-size:12px;color:var(--muted);">${escapeHtml(r.description || "")}</div>
+        </div>`).join("");
     } catch (err) {
       showToast(err.message, "error");
     }
   });
 
-  window.selectGitRepo = async (fullName, defaultBranch) => {
-    selectedRepo = { fullName, defaultBranch };
+  window._selRepo = (fullName) => {
+    document.getElementById("import-repo-url").value = `https://github.com/${fullName}.git`;
     document.getElementById("import-repo-name").value = fullName.split("/")[1];
-    document.getElementById("github-import-details").style.display = "block";
-    const token = localStorage.getItem("github_token") || document.getElementById("github-token-input").value;
-    const [owner, repo] = fullName.split("/");
-    try {
-      const res = await fetch(`${API_BASE}/github/branches?owner=${owner}&repo=${repo}&token=${token}`);
-      const data = await res.json();
-      document.getElementById("import-branch").innerHTML = (data.branches || [])
-        .map((b) => `<option value="${b.name}" ${b.name === defaultBranch ? "selected" : ""}>${b.name}</option>`)
-        .join("");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
   };
 
-  document.getElementById("do-import-git").addEventListener("click", async () => {
-    const token = localStorage.getItem("github_token") || document.getElementById("github-token-input").value;
-    if (!selectedRepo) {
-      showToast("Select a repo", "error");
-      return;
-    }
+  document.getElementById("do-import-git")?.addEventListener("click", async () => {
+    const repoUrl = document.getElementById("import-repo-url").value;
     const projectName = document.getElementById("import-repo-name").value;
-    const branch = document.getElementById("import-branch").value;
+    if (!repoUrl || !projectName) return showToast("Repo URL and name required", "error");
     try {
-      showToast("Importing...", "info");
-      const result = await api("/projects/import-git", {
-        method: "POST",
-        body: JSON.stringify({ repoUrl: `https://github.com/${selectedRepo.fullName}.git`, projectName }),
-      });
-      document.getElementById("github-import-modal").classList.remove("open");
-      showToast(`Imported ${projectName} (${result.commitCount || 0} commits)`, "success");
-      loadProjects();
-      setTimeout(() => viewProject(result.project.id), 500);
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  });
-
-  // New Project buttons (header + projects section)
-  const newProjectBtn = document.getElementById("new-project-btn");
-  const showCreateProjectForm = document.getElementById("show-create-project-form");
-  const createProjectFormContainer = document.getElementById("create-project-form-container");
-  const importGitFormContainer = document.getElementById("import-git-form-container");
-
-  function showCreateProjectFormUI() {
-    if (createProjectFormContainer) createProjectFormContainer.style.display = "block";
-    if (importGitFormContainer) importGitFormContainer.style.display = "none";
-  }
-
-  if (newProjectBtn) newProjectBtn.addEventListener("click", showCreateProjectFormUI);
-  if (showCreateProjectForm) showCreateProjectForm.addEventListener("click", showCreateProjectFormUI);
-
-  // Create project form
-  const createProjectInlineForm = document.getElementById("create-project-inline-form");
-  if (createProjectInlineForm) {
-    createProjectInlineForm.addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const formData = {
-        name: document.getElementById("project-name-inline").value,
-        description: document.getElementById("project-description-inline").value,
-        framework: document.getElementById("project-framework-inline").value,
-      };
-      try {
-        showToast("Creating project...", "info");
-        const project = await api("/projects", {
-          method: "POST",
-          body: JSON.stringify(formData),
-        });
-        if (createProjectFormContainer) createProjectFormContainer.style.display = "none";
-        createProjectInlineForm.reset();
-        showToast(`Project "${project.name}" created`, "success");
-        loadProjects();
-        loadOverview();
-        populateProjectSelects();
-      } catch (err) {
-        showToast(err.message, "error");
-      }
-    });
-  }
-
-  // Cancel create project
-  const cancelCreateProjectInline = document.getElementById("cancel-create-project-inline");
-  if (cancelCreateProjectInline && createProjectFormContainer) {
-    cancelCreateProjectInline.addEventListener("click", () => {
-      createProjectFormContainer.style.display = "none";
-      createProjectInlineForm.reset();
-    });
-  }
-
-  // Import Git form
-  const showImportGitForm = document.getElementById("show-import-git-form");
-  if (showImportGitForm) {
-    showImportGitForm.addEventListener("click", () => {
-      if (importGitFormContainer) importGitFormContainer.style.display = "block";
-      if (createProjectFormContainer) createProjectFormContainer.style.display = "none";
-    });
-  }
-
-  const cancelImportGit = document.getElementById("cancel-import-git");
-  if (cancelImportGit && importGitFormContainer) {
-    cancelImportGit.addEventListener("click", () => {
-      importGitFormContainer.style.display = "none";
-      document.getElementById("import-git-form").reset();
-    });
-  }
-
-  document.getElementById("import-git-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const repoUrl = document.getElementById("git-repo-url").value;
-    const projectName = document.getElementById("git-project-name").value;
-
-    if (!repoUrl || !projectName) {
-      showToast("Please fill in all required fields", "error");
-      return;
-    }
-
-    try {
-      showToast("Importing repository...", "info");
+      showToast("Importing repository and fetching all commits...", "info");
       const result = await api("/projects/import-git", {
         method: "POST",
         body: JSON.stringify({ repoUrl, projectName }),
       });
-      importGitFormContainer.style.display = "none";
-      document.getElementById("import-git-form").reset();
-      showToast(`Repository imported as "${result.project.name}" (${result.commitCount || 0} commits)`, "success");
+      document.getElementById("github-import-modal").classList.remove("open");
+      showToast(`Imported ${projectName} (${result.commitCount || 0} commits)`, "success");
       loadProjects();
       loadOverview();
-      populateProjectSelects();
-      setTimeout(() => viewProject(result.project.id), 500);
+      // Navigate to Commits tab to show all commits
+      setTimeout(() => {
+        navigateTo("commits");
+      }, 500);
     } catch (err) {
       showToast(err.message, "error");
     }
   });
 
-  // Deployment filters
-  document.getElementById("deployment-project-filter").addEventListener("change", loadDeployments);
-  document.getElementById("deployment-status-filter").addEventListener("change", loadDeployments);
-
-  // Build logs
-  document.getElementById("build-log-deployment").addEventListener("change", loadBuildLogs);
-  document.getElementById("refresh-logs").addEventListener("click", loadBuildLogs);
-
-  // Add domain form
-  document.getElementById("add-domain-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    const formData = {
-      projectId: document.getElementById("domain-project").value,
-      name: document.getElementById("domain-name").value,
-      environment: document.getElementById("domain-environment").value,
-    };
-    addDomainFromForm(formData);
-  });
-
-  document.getElementById("close-add-domain").addEventListener("click", () => closeModal("add-domain-modal"));
-  document.getElementById("cancel-add-domain").addEventListener("click", () => closeModal("add-domain-modal"));
-
-  // Tabs in project detail
   document.querySelectorAll(".tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      document.querySelectorAll(".tab-btn").forEach((b) => (b.style.borderBottom = "none"));
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
       document.querySelectorAll(".tab-content").forEach((tc) => (tc.style.display = "none"));
-      btn.style.borderBottom = "2px solid #000";
-      btn.style.marginBottom = "-2px";
+      btn.classList.add("active");
       document.getElementById(`tab-${btn.dataset.tab}`).style.display = "block";
-      if (btn.dataset.tab === "commits" && currentProjectId) {
-        loadProjectDetailCommits(currentProjectId);
-      }
+      if (btn.dataset.tab === "commits" && currentProjectId) loadProjectDetailCommits(currentProjectId);
     });
   });
 
-  window.loadProjectDetailCommits = async (projectId) => {
-    const tbody = document.getElementById("project-detail-commits-body");
-    const empty = document.getElementById("project-detail-commits-empty");
-    try {
-      const data = await api(`/projects/${projectId}/github/commits?limit=100`);
-      if (!data.commits || data.commits.length === 0) {
-        if (empty) empty.style.display = "block";
-        if (tbody) tbody.innerHTML = "";
-        return;
-      }
-      if (empty) empty.style.display = "none";
-      if (tbody) {
-        tbody.innerHTML = data.commits
-          .map(
-            (c) => `
-            <tr>
-              <td><code>${c.sha.slice(0, 7)}</code></td>
-              <td>${escapeHtml(c.message.split("\n")[0])}</td>
-              <td>${escapeHtml(c.authorName)}</td>
-              <td>${c.authorDate ? new Date(c.authorDate).toLocaleDateString() : "-"}</td>
-              <td><a href="${c.htmlUrl || '#'}" target="_blank" class="btn btn-outline btn-sm">View</a></td>
-            </tr>
-          `
-          )
-          .join("");
-      }
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  };
-    document.getElementById("add-env-form-container").style.display = "block";
-  });
-
-  document.getElementById("cancel-add-env-inline").addEventListener("click", () => {
-    document.getElementById("add-env-form-container").style.display = "none";
-    document.getElementById("add-env-inline-form").reset();
-  });
-
-  document.getElementById("add-env-inline-form").addEventListener("submit", (e) => {
+  document.getElementById("deploy-project-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const projectSelect = document.getElementById("env-project");
-    const formData = {
-      projectId: projectSelect.value,
-      key: document.getElementById("env-key-inline").value,
-      value: document.getElementById("env-value-inline").value,
-      type: document.getElementById("env-type-inline").value,
-      environment: document.getElementById("env-environment").value,
-    };
-    addEnvVarFromForm(formData).then(() => {
-      document.getElementById("add-env-form-container").style.display = "none";
-      document.getElementById("add-env-inline-form").reset();
-    });
-  });
-
-  // Env project/environment change
-  document.getElementById("env-project").addEventListener("change", loadEnvVars);
-  document.getElementById("env-environment").addEventListener("change", loadEnvVars);
-
-  // Deploy project form (in project detail view)
-  document.getElementById("deploy-project-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fileInput = document.getElementById("deploy-zip");
-    const file = fileInput.files[0];
-    if (!file) {
-      showToast("Please select a ZIP file", "error");
-      return;
-    }
-    const formData = new FormData();
-    formData.append("zip", file);
+    const file = document.getElementById("deploy-zip").files[0];
+    if (!file) return showToast("Select a ZIP file", "error");
+    const fd = new FormData();
+    fd.append("zip", file);
     try {
       showToast("Deploying...", "info");
-      const res = await fetch(`${API_BASE}/projects/${currentProjectId}/deployments`, {
-        method: "POST",
-        body: formData,
-      });
+      const res = await fetch(`${API_BASE}/projects/${currentProjectId}/deployments`, { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "Deployment failed");
-      }
+      if (!res.ok) throw new Error(data.error || "Deploy failed");
       showToast("Deployment created", "success");
-      fileInput.value = "";
       loadProjectDeployments(currentProjectId);
-      loadProjects();
-      loadOverview();
     } catch (err) {
       showToast(err.message, "error");
     }
   });
 
-  // GitHub connect
-  document.getElementById("github-connect-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const repoUrl = document.getElementById("github-repo-url").value;
-    const branch = document.getElementById("github-branch").value;
-    const token = document.getElementById("github-token").value;
+  document.getElementById("env-project")?.addEventListener("change", loadEnvVars);
+  document.getElementById("env-environment")?.addEventListener("change", loadEnvVars);
 
-    if (!repoUrl || !token) {
-      showToast("Repository URL and token are required", "error");
-      return;
-    }
+  document.getElementById("deployment-project-filter")?.addEventListener("change", loadDeployments);
+  document.getElementById("deployment-status-filter")?.addEventListener("change", loadDeployments);
 
-    try {
-      showToast("Connecting to GitHub...", "info");
-      const result = await api(`/projects/${currentProjectId}/github/connect`, {
-        method: "POST",
-        body: JSON.stringify({ repoUrl, token, branch }),
-      });
-      document.getElementById("github-connect-form").style.display = "none";
-      document.getElementById("github-connected").style.display = "block";
-      document.getElementById("github-repo-display").textContent = repoUrl;
-      document.getElementById("github-branch-display").textContent = branch;
-      showToast("GitHub connected", "success");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
+  document.getElementById("show-add-env-btn")?.addEventListener("click", () => {
+    const projectId = document.getElementById("env-project").value;
+    if (!projectId) return showToast("Select a project first", "error");
+    const key = prompt("Variable key:");
+    const value = prompt("Variable value:");
+    if (!key || !value) return;
+    api(`/projects/${projectId}/env`, {
+      method: "POST",
+      body: JSON.stringify({ key, value, type: "config", environment: document.getElementById("env-environment").value }),
+    }).then(() => { showToast("Variable added", "success"); loadEnvVars(); }).catch((e) => showToast(e.message, "error"));
   });
 
-  // Sync GitHub commits
-  window.syncGitHubCommits = async () => {
-    if (!currentProjectId) return;
-    try {
-      showToast("Syncing commits...", "info");
-      const result = await api(`/projects/${currentProjectId}/github/sync`, {
-        method: "POST",
-      });
-      const ts = result.project?.github_last_synced_at
-        ? new Date(result.project.github_last_synced_at).toLocaleString()
-        : "Just now";
-      document.getElementById("github-synced-display").textContent = ts;
-      loadCommits(currentProjectId);
-      showToast(`Synced ${result.count} commits`, "success");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  };
-
-  // Disconnect GitHub
-  window.disconnectGitHub = async () => {
-    if (!currentProjectId) return;
-    try {
-      await api(`/projects/${currentProjectId}/github/disconnect`, {
-        method: "DELETE",
-      });
-      document.getElementById("github-connected").style.display = "none";
-      document.getElementById("github-connect-form").style.display = "block";
-      document.getElementById("github-connect-form").querySelectorAll("input").forEach((i) => (i.value = ""));
-      document.getElementById("commits-list-wrap").style.display = "none";
-      document.getElementById("commits-empty").style.display = "block";
-      showToast("GitHub disconnected", "success");
-    } catch (err) {
-      showToast(err.message, "error");
-    }
-  };
-
-  // Load commits
-  window.loadCommits = async (projectId) => {
-    const tbody = document.getElementById("commits-table-body");
-    const empty = document.getElementById("commits-empty");
-    const wrap = document.getElementById("commits-list-wrap");
-    try {
-      const data = await api(`/projects/${projectId}/github/commits?limit=50`);
-      if (!data.commits || data.commits.length === 0) {
-        wrap.style.display = "none";
-        empty.style.display = "block";
-        return;
-      }
-      empty.style.display = "none";
-      wrap.style.display = "block";
-      tbody.innerHTML = data.commits
-        .map(
-          (c) => `
-          <tr>
-            <td><code>${c.sha.slice(0, 7)}</code></td>
-            <td>${escapeHtml(c.message)}</td>
-            <td>${escapeHtml(c.authorName)}</td>
-            <td>${c.authorDate ? new Date(c.authorDate).toLocaleString() : "-"}</td>
-            <td>
-              <a href="${c.htmlUrl}" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm">View on GitHub</a>
-            </td>
-          </tr>
-        `
-        )
-        .join("");
-    } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5" style="color:red">Error: ${escapeHtml(err.message)}</td></tr>`;
-    }
-  };
-
-  // Also load commits when viewing project
-  const origViewProject = window.viewProject;
-  window.viewProject = (id) => {
-    origViewProject(id);
-    setTimeout(() => {
-      // Check if GitHub is connected
-      api(`/projects/${id}`).then((p) => {
-        if (p.github_repo_url) {
-          document.getElementById("github-connect-form").style.display = "none";
-          document.getElementById("github-connected").style.display = "block";
-          document.getElementById("github-repo-display").textContent = p.github_repo_url;
-          document.getElementById("github-branch-display").textContent = p.github_branch || "main";
-          document.getElementById("github-synced-display").textContent = p.github_last_synced_at
-            ? new Date(p.github_last_synced_at).toLocaleString()
-            : "Never";
-          loadCommits(id);
-        }
-      }).catch(() => {});
-    }, 100);
-  };
-
-  // Modal close on overlay click
-  document.querySelectorAll(".modal-overlay").forEach((overlay) => {
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.classList.remove("open");
-    });
-  });
-
-  // Initial load
   loadOverview();
-  populateProjectSelects();
 });
 
-// ---------- Global functions (used by inline onclick) ----------
-function loadProjectDeployments(projectId) {
-  const tbody = document.getElementById("project-deployments-table-body");
-  if (!tbody) {
-    const alt = document.getElementById("project-deployments-tbody");
-    if (!alt) return;
-    return loadProjectDeploymentsInto(alt, projectId);
-  }
-  loadProjectDeploymentsInto(tbody, projectId);
-}
-
-function loadProjectDeploymentsInto(tbody, projectId) {
-  tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
-  api(`/projects/${projectId}/deployments`)
-    .then((data) => {
-      if (!data.deployments || data.deployments.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6">No deployments yet</td></tr>';
-        return;
-      }
-      tbody.innerHTML = "";
-      for (const d of data.deployments) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${d.version || "-"}</td>
-          <td>${escapeHtml(d.status)}</td>
-          <td>${d.build_duration_ms ? formatDuration(d.build_duration_ms) : "-"}</td>
-          <td>${d.file_count || 0}</td>
-          <td>${d.created_at ? formatDate(d.created_at) : "-"}</td>
-          <td>
-            <button class="btn btn-sm" onclick="viewDeployment('${d.id}')">View</button>
-            ${d.status === "ready" ? `<button class="btn btn-sm" onclick="rollbackDeployment('${d.id}')">Rollback</button>` : ""}
-          </td>
-        `;
-        tbody.appendChild(tr);
-      }
-    })
-    .catch((e) => {
-      tbody.innerHTML = `<tr><td colspan="6" style="color:red">Error: ${escapeHtml(e.message)}</td></tr>`;
-    });
-}
-
-function viewProject(id) {
-  const project = projects.find(p => p.id === id);
-  if (!project) {
-    showToast("Project not found", "error");
-    return;
-  }
-
-  currentProjectId = id;
-  document.getElementById("projects-list").style.display = "none";
-  document.getElementById("projects-empty").style.display = "none";
-  document.getElementById("project-detail").style.display = "block";
-  document.getElementById("create-project-form-container").style.display = "none";
-  document.getElementById("import-git-form-container").style.display = "none";
-  document.getElementById("show-create-project-form").style.display = "none";
-  document.getElementById("show-import-git-form").style.display = "none";
-
-  document.getElementById("project-detail-name").textContent = project.name;
-  document.getElementById("project-detail-description").textContent = project.description || "No description";
-  document.getElementById("project-settings-git").textContent = project.github_repo_url || "Not connected";
-
-  // Reset tabs
-  document.querySelectorAll(".tab-btn").forEach((b, i) => {
-    b.style.borderBottom = i === 0 ? "2px solid #000" : "none";
-    b.style.marginBottom = i === 0 ? "-2px" : "0";
-  });
-  document.querySelectorAll(".tab-content").forEach((tc, i) => {
-    tc.style.display = i === 0 ? "block" : "none";
-  });
-
-  loadProjectDeployments(id);
-  loadProjectDetailCommits(id);
-}
-
-window.viewDeployment = viewDeployment;
-window.rollbackDeployment = rollbackDeployment;
-window.deleteProject = deleteProject;
-window.viewProject = viewProject;
-window.deleteDomain = deleteDomain;
-window.verifyDomain = verifyDomain;
-window.deleteEnvVar = deleteEnvVar;

@@ -1,4 +1,4 @@
-"use strict";
+﻿"use strict";
 
 const path = require("path");
 const fs = require("fs");
@@ -6,11 +6,15 @@ const crypto = require("crypto");
 
 const initSqlJs = require("sql.js");
 
-const DB_PATH = path.join(__dirname, "data", "platform.db");
+const IS_VERCEL = !!process.env.VERCEL;
+const TMP_BASE = process.env.TMPDIR || process.env.TEMP || "/tmp";
+const DB_PATH = process.env.DB_PATH || (IS_VERCEL ? path.join(TMP_BASE, "vg-platform.db") : path.join(__dirname, "data", "platform.db"));
 
 function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
+  try {
+    if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
   }
 }
 
@@ -19,13 +23,27 @@ ensureDir(path.dirname(DB_PATH));
 let db = null;
 let initialized = false;
 const initPromise = (async () => {
-  const SQLModule = await initSqlJs();
+  // Locate sql.js wasm reliably in local and serverless bundles.
+  let wasmBinary;
+  try {
+    const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+    wasmBinary = fs.readFileSync(wasmPath);
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
+    console.warn("[vg-deploy] sql-wasm.wasm not found in bundle; DB disabled on Vercel.", e.message);
+    return;
+  }
+  const SQLModule = await initSqlJs({ wasmBinary });
   db = new SQLModule.Database();
 
-  // Load existing database if present
-  if (fs.existsSync(DB_PATH)) {
-    const fileContents = fs.readFileSync(DB_PATH);
-    db = new SQLModule.Database(fileContents);
+  // Load existing database if present (best-effort; Vercel /tmp is ephemeral)
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const fileContents = fs.readFileSync(DB_PATH);
+      db = new SQLModule.Database(fileContents);
+    }
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
   }
 
   initSchema();
@@ -51,6 +69,9 @@ function initSchema() {
       project_id TEXT NOT NULL,
       version INTEGER NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
+      commit_sha TEXT,
+      branch TEXT,
+      environment TEXT DEFAULT 'production',
       url_path TEXT,
       artifact_path TEXT,
       file_count INTEGER DEFAULT 0,
@@ -133,6 +154,9 @@ function initSchema() {
   } catch (e) {
     // Column may already exist
   }
+  try { db.exec(`ALTER TABLE deployments ADD COLUMN commit_sha TEXT;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE deployments ADD COLUMN branch TEXT;`); } catch (e) {}
+  try { db.exec(`ALTER TABLE deployments ADD COLUMN environment TEXT DEFAULT 'production';`); } catch (e) {}
 
   saveDb();
 }
@@ -143,7 +167,7 @@ function saveDb() {
     const data = db.export();
     fs.writeFileSync(DB_PATH, Buffer.from(data));
   } catch (e) {
-    // Ignore save errors
+    // Ignore save errors (e.g. read-only serverless filesystem)
   }
 }
 
@@ -156,6 +180,7 @@ function generateId() {
 }
 
 function run(sql, params = []) {
+  if (!db) return;
   const stmt = db.prepare(sql);
   stmt.bind(params);
   stmt.step();
@@ -163,6 +188,7 @@ function run(sql, params = []) {
 }
 
 function get(sql, params = []) {
+  if (!db) return undefined;
   const stmt = db.prepare(sql);
   stmt.bind(params);
   const hasRow = stmt.step();
@@ -176,6 +202,7 @@ function get(sql, params = []) {
 }
 
 function all(sql, params = []) {
+  if (!db) return [];
   const stmt = db.prepare(sql);
   stmt.bind(params);
   const rows = [];
@@ -233,15 +260,26 @@ function deleteProject(id) {
 
 // ---- Deployment operations ----
 
-function createDeployment(projectId, version, status = "pending") {
+function createDeployment(projectId, version, status = "pending", opts = {}) {
   const id = generateId();
   const ts = now();
+  const commitSha = opts.commitSha || opts.commit_sha || null;
+  const branch = opts.branch || null;
+  const environment = opts.environment || "production";
   run(
-    "INSERT INTO deployments (id, project_id, version, status, created_at) VALUES (?, ?, ?, ?, ?)",
-    [id, projectId, version, status, ts]
+    "INSERT INTO deployments (id, project_id, version, status, commit_sha, branch, environment, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    [id, projectId, version, status, commitSha, branch, environment, ts]
   );
   saveDb();
   return getDeploymentById(id);
+}
+
+function getDeploymentByCommit(projectId, commitSha) {
+  if (!projectId || !commitSha) return null;
+  return get(
+    "SELECT * FROM deployments WHERE project_id = ? AND commit_sha = ? ORDER BY created_at DESC LIMIT 1",
+    [projectId, commitSha]
+  );
 }
 
 function getDeploymentById(id) {
@@ -410,7 +448,15 @@ function listCommits(projectId, limit = 50) {
   );
 }
 
-function listAllCommits(limit = 100) {
+function listAllCommits(limit) {
+  if (limit == null) {
+    return all(
+      `SELECT c.*, p.name as project_name 
+       FROM repository_commits c 
+       JOIN projects p ON p.id = c.project_id 
+       ORDER BY c.author_date DESC`
+    );
+  }
   return all(
     `SELECT c.*, p.name as project_name 
      FROM repository_commits c 
@@ -458,9 +504,13 @@ module.exports = {
   listDomains,
   verifyDomain,
   deleteDomain,
+  setProjectGitHub,
+  upsertCommit,
+  getCommitById,
   listCommits,
   listAllCommits,
   deleteCommits,
+  getDeploymentByCommit,
   now,
   generateId,
 };

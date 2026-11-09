@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -7,105 +7,116 @@
   <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">
-      <img class="brand-logo" src="/images/Value-Global.png" alt="VG Deployment App logo">
-      <span class="brand-name">VG Deployment App</span>
-    </div>
-    <div class="topbar-actions">
-      <button class="btn btn-primary" id="new-project-btn">New Project</button>
-    </div>
-  </header>
-
   <div class="shell">
-    <nav class="sidebar">
-      <ul class="nav-list">
-        <li><a href="#" class="nav-link active" data-section="overview"><span class="nav-icon">🏠</span> Overview</a></li>
-        <li><a href="#" class="nav-link" data-section="projects"><span class="nav-icon">📁</span> Projects</a></li>
-        <li><a href="#" class="nav-link" data-section="deployments"><span class="nav-icon">🚀</span> Deployments</a></li>
-        <li><a href="#" class="nav-link" data-section="templates"><span class="nav-icon">📋</span> Templates</a></li>
-        <li><a href="#" class="nav-link" data-section="storage"><span class="nav-icon">💾</span> Storage</a></li>
-        <li><a href="#" class="nav-link" data-section="integrations"><span class="nav-icon">🔗</span> Integrations</a></li>
-        <li><a href="#" class="nav-link" data-section="domains"><span class="nav-icon">🌐</span> Domains</a></li>
-        <li><a href="#" class="nav-link" data-section="observability"><span class="nav-icon">📊</span> Observability</a></li>
-        <li><a href="#" class="nav-link" data-section="logs"><span class="nav-icon">📝</span> Logs</a></li>
-        <li><a href="#" class="nav-link" data-section="analytics"><span class="nav-icon">📈</span> Analytics</a></li>
-        <li><a href="#" class="nav-link" data-section="configuration"><span class="nav-icon">⚙️</span> Configuration</a></li>
-        <li><a href="#" class="nav-link" data-section="env"><span class="nav-icon">🔐</span> Environment Variables</a></li>
-        <li><a href="#" class="nav-link" data-section="team"><span class="nav-icon">👥</span> Team</a></li>
-        <li><a href="#" class="nav-link" data-section="billing"><span class="nav-icon">💳</span> Billing</a></li>
-        <li><a href="#" class="nav-link" data-section="settings"><span class="nav-icon">⚙️</span> Settings</a></li>
-      </ul>
-      <div class="sidebar-footer">
-        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-          <div style="width: 32px; height: 32px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center;">U</div>
-          <div>
-            <div style="font-size: 0.875rem; font-weight: 500;">Local User</div>
-            <div style="font-size: 0.75rem; color: #64748b;">Free plan</div>
-          </div>
+    <header class="topbar">
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <div class="brand">
+          <img class="brand-logo" src="/images/Value-Global.png" alt="VG" onerror="this.style.display='none'">
+          <span class="brand-name">VG Deployment</span>
         </div>
-        <span class="version">v1.0.0</span>
+        <div class="team-switcher"><span>Personal Account</span><span style="font-size:10px;">▼</span></div>
       </div>
-    </nav>
-      <div class="sidebar-footer">
-        <span class="version">v1.0.0</span>
-        <span class="local-badge">127.0.0.1</span>
+      <div class="topbar-right">
+        <div class="cmdk-trigger"><span>Search...</span><span class="cmdk-kbd">⌘K</span></div>
+        <button class="btn btn-primary" id="new-project-btn">New Project</button>
+        <div class="user-avatar"></div>
       </div>
-    </nav>
+    </header>
+
+      <nav class="subnav">
+        <a href="#" class="nav-link active" data-section="overview">Overview</a>
+        <a href="#" class="nav-link" data-section="projects">Projects</a>
+        <a href="#" class="nav-link" data-section="commits">Commits</a>
+        <a href="#" class="nav-link" data-section="deployments">Deployments</a>
+        <a href="#" class="nav-link" data-section="integrations">Integrations</a>
+        <a href="#" class="nav-link" data-section="domains">Domains</a>
+        <a href="#" class="nav-link" data-section="observability">Observability</a>
+        <a href="#" class="nav-link" data-section="settings">Settings</a>
+      </nav>
 
     <main class="main">
       <section id="section-overview" class="section active">
         <div class="section-header">
           <h1 class="section-title">Overview</h1>
-          <p class="section-subtitle">Monitor your projects and deployments</p>
         </div>
-        <div class="overview-grid">
-          <div class="card stat-card">
-            <div class="stat-label">Projects</div>
-            <div class="stat-value" id="stat-projects">0</div>
-            <div class="stat-desc">Total projects created</div>
-          </div>
-          <div class="card stat-card">
-            <div class="stat-label">Deployments</div>
-            <div class="stat-value" id="stat-deployments">0</div>
-            <div class="stat-desc">Total deployments</div>
-          </div>
-          <div class="card stat-card">
-            <div class="stat-label">Ready</div>
-            <div class="stat-value" id="stat-ready">0</div>
-            <div class="stat-desc">Successfully deployed</div>
-          </div>
-          <div class="card stat-card">
-            <div class="stat-label">Failed</div>
-            <div class="stat-value" id="stat-failed">0</div>
-            <div class="stat-desc">Deployments with errors</div>
-          </div>
+        <div class="metrics-grid">
+          <div class="metric-card"><div class="metric-label">Total Projects</div><div class="metric-value" id="stat-projects">0</div></div>
+          <div class="metric-card"><div class="metric-label">Total Deployments</div><div class="metric-value" id="stat-deployments">0</div></div>
+          <div class="metric-card"><div class="metric-label">Ready</div><div class="metric-row"><span class="status-dot ready"></span><div class="metric-value" id="stat-ready">0</div></div></div>
+          <div class="metric-card"><div class="metric-label">Failed</div><div class="metric-row"><span class="status-dot failed"></span><div class="metric-value" id="stat-failed">0</div></div></div>
         </div>
-        <div class="empty-state" id="overview-empty" style="display:none;">
-          <div class="empty-icon">&#128163;</div>
-          <h2>No projects yet</h2>
-          <p>Create your first project to get started.</p>
-          <button class="btn btn-primary" id="create-project-from-empty">Create Project</button>
-        </div>
-        <div class="recent-deployments" id="recent-deployments" style="display:none;">
-          <h2 class="subsection-title">Recent Deployments</h2>
+        <div id="overview-empty" class="empty-state" style="display:none;"><h2>No projects yet</h2><p>Import a repository to get started.</p></div>
+        <div id="recent-deployments" style="display:none;">
+          <h2 style="margin-bottom:16px;font-size:18px;">Recent Deployments</h2>
           <div class="table-wrap">
             <table class="data-table">
-              <thead>
-                <tr>
-                  <th>Project</th>
-                  <th>Version</th>
-                  <th>Status</th>
-                  <th>Duration</th>
-                  <th>URL</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
+              <thead><tr><th>Project</th><th>Commit</th><th>Status</th><th>Duration</th><th>Created</th><th>Actions</th></tr></thead>
               <tbody id="recent-deployments-body"></tbody>
             </table>
           </div>
         </div>
       </section>
+
+      <section id="section-projects" class="section">
+        <div class="section-header"><h1 class="section-title">Projects</h1></div>
+        <div class="filters-bar">
+          <input type="text" class="search-input" placeholder="Search projects...">
+          <button class="btn btn-primary" id="show-import-git-modal">Import Git Repository</button>
+        </div>
+        <div class="modal-overlay" id="github-import-modal">
+          <div class="modal">
+            <div class="modal-header"><h3>Import Git Repository</h3><button class="modal-close" id="close-github-import">&times;</button></div>
+            <div class="modal-body">
+              <div class="form-group"><label>GitHub Token (optional)</label><input type="password" id="github-token-input" placeholder="ghp_xxx"></div>
+              <button class="btn btn-outline" id="load-github-repos" style="margin-bottom:12px;">Browse Repos</button>
+              <div id="github-repos-list" style="display:none; max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:6px; margin-bottom:12px;">
+                <div id="github-repos-loading" style="padding:12px;text-align:center;color:var(--muted);">Loading...</div>
+                <div id="github-repos-items" style="display:none;"></div>
+              </div>
+              <div class="form-group"><label>Repository URL</label><input type="url" id="import-repo-url" placeholder="https://github.com/user/repo.git"></div>
+              <div class="form-group"><label>Project Name</label><input type="text" id="import-repo-name"></div>
+              <button class="btn btn-primary" id="do-import-git" style="width:100%;">Import</button>
+            </div>
+          </div>
+        </div>
+        <div id="projects-list" class="table-wrap">
+          <table class="data-table"><thead><tr><th>Name</th><th>Framework</th><th>Created</th><th>Actions</th></tr></thead><tbody id="projects-table-body"></tbody></table>
+        </div>
+        <div id="projects-empty" class="empty-state" style="display:none;"><h2>No projects</h2></div>
+      </section>
+
+      <section id="section-deployments" class="section">
+        <div class="section-header"><h1 class="section-title">Deployments</h1></div>
+        <div id="deployments-table-wrap" class="table-wrap">
+          <table class="data-table"><thead><tr><th>Project</th><th>Status</th><th>Duration</th><th>Created</th><th>Actions</th></tr></thead><tbody id="deployments-table-body"></tbody></table>
+        </div>
+      </section>
+
+      <section id="section-integrations" class="section"><div class="section-header"><h1 class="section-title">Integrations</h1></div><div class="card"><h3>GitHub</h3><p style="color:var(--muted);">Connect to import repositories.</p></div></section>
+      <section id="section-observability" class="section"><div class="section-header"><h1 class="section-title">Observability</h1></div></section>
+      <section id="section-settings" class="section"><div class="section-header"><h1 class="section-title">Settings</h1></div><div class="card"><h3>General</h3><p style="color:var(--muted);">Local mode (127.0.0.1)</p></div></section>
+
+      <div id="project-detail" style="display:none;">
+        <button class="btn btn-outline" id="back-to-projects" style="margin-bottom:16px;">← Back</button>
+        <h1 class="section-title" id="project-detail-name"></h1>
+        <p class="section-subtitle" id="project-detail-description"></p>
+        <div class="subnav" style="margin:16px -24px 24px;padding:0 24px;">
+          <button class="nav-link tab-btn active" data-tab="deployments" style="background:none;border:none;cursor:pointer;">Deployments</button>
+          <button class="nav-link tab-btn" data-tab="commits" style="background:none;border:none;cursor:pointer;">Commits</button>
+        </div>
+        <div id="tab-deployments" class="tab-content">
+          <div class="card"><form id="deploy-project-form"><input type="file" id="deploy-zip" accept=".zip" required style="margin-bottom:12px;display:block;"><button type="submit" class="btn btn-primary">Deploy</button></form></div>
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody id="project-deployments-table-body"></tbody></table></div>
+        </div>
+        <div id="tab-commits" class="tab-content" style="display:none;">
+          <div class="table-wrap"><table class="data-table"><thead><tr><th>SHA</th><th>Message</th><th>Author</th><th>Date</th></tr></thead><tbody id="project-detail-commits-body"></tbody></table></div>
+        </div>
+      </div>
+    </main>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script src="/js/app.js"></script>
+</body>
 
       <section id="section-projects" class="section">
         <div class="section-header">
@@ -351,72 +362,34 @@
       <section id="section-commits" class="section">
         <div class="section-header">
           <h1 class="section-title">Commits</h1>
-          <p class="section-subtitle">All Git commits from imported repositories</p>
+          <p class="section-subtitle">Recent commits from imported Git repositories</p>
         </div>
         <div id="commits-page-wrap" class="table-wrap">
           <table class="data-table">
             <thead>
               <tr>
                 <th>Project</th>
-                <th>SHA</th>
+                <th>Commit</th>
                 <th>Message</th>
                 <th>Author</th>
                 <th>Date</th>
-                <th>Actions</th>
               </tr>
             </thead>
-            <tbody id="commits-page-body"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="commits-page-empty" style="display:none;">
-          <div class="empty-icon">&#128200;</div>
-          <h2>No commits yet</h2>
-          <p>Import a Git repository to see all commits here.</p>
-        </div>
-      </section>
-        <div class="section-header">
-          <h1 class="section-title">Deployments</h1>
-          <p class="section-subtitle">View and manage your deployments</p>
-        </div>
-        <div class="deployments-filters">
-          <select id="deployment-project-filter">
-            <option value="">All Projects</option>
-          </select>
-          <select id="deployment-status-filter">
-            <option value="">All Statuses</option>
-            <option value="ready">Ready</option>
-            <option value="building">Building</option>
-            <option value="error">Error</option>
-            <option value="pending">Pending</option>
-          </select>
-        </div>
-        <div id="deployments-table-wrap" class="table-wrap">
-          <table class="data-table">
-            <thead>
+            <tbody id="commits-page-body">
               <tr>
-                <th>Project</th>
-                <th>Version</th>
-                <th>Status</th>
-                <th>Duration</th>
-                <th>Files</th>
-                <th>Created</th>
-                <th>Actions</th>
+                <td colspan="5" style="color:var(--muted); padding:24px; text-align:center;">
+                  <strong style="color:#fff; display:block; margin-bottom:4px;">No commits yet</strong>
+                  Import a Git repository to fetch and display all commits, like Vercel.
+                </td>
               </tr>
-            </thead>
-            <tbody id="deployments-table-body"></tbody>
+            </tbody>
           </table>
-        </div>
-        <div class="empty-state" id="deployments-empty" style="display:none;">
-          <div class="empty-icon">&#128196;</div>
-          <h2>No deployments</h2>
-          <p>Deploy a project to see it here.</p>
         </div>
       </section>
 
       <section id="section-build-logs" class="section">
         <div class="section-header">
           <h1 class="section-title">Build Logs</h1>
-          <p class="section-subtitle">View deployment build logs</p>
         </div>
         <div class="build-log-selector">
           <label for="build-log-deployment">Select Deployment</label>
@@ -426,40 +399,133 @@
         <div class="log-container" id="log-container">
           <pre class="log-pre" id="build-log-content">Select a deployment to view its logs.</pre>
         </div>
-        <div class="empty-state" id="build-logs-empty" style="display:none;">
-          <div class="empty-icon">&#128223;</div>
-          <h2>No build logs</h2>
-          <p>No deployment logs available yet.</p>
+      </section>
+
+      <section id="section-deployment-detail" class="section dep-page">
+        <div class="dep-top">
+          <button class="btn btn-outline btn-sm" id="dep-back" type="button">← Deployments</button>
+          <div class="dep-title-wrap">
+            <h1 class="section-title dep-title" id="dep-id">Deployment</h1>
+            <div class="dep-sub" id="dep-subtitle"></div>
+          </div>
+          <div class="dep-top-actions">
+            <a class="btn btn-primary btn-sm" id="dep-visit" href="#" target="_blank" rel="noopener" style="display:none;">Visit</a>
+          </div>
+        </div>
+
+        <div class="dep-tabs" role="tablist">
+          <button class="dep-tab active" data-dep-tab="deployment" type="button">Deployment</button>
+          <button class="dep-tab" data-dep-tab="logs" type="button">Logs</button>
+          <button class="dep-tab" data-dep-tab="resources" type="button" disabled>Resources</button>
+          <button class="dep-tab" data-dep-tab="source" type="button">Source</button>
+          <button class="dep-tab" data-dep-tab="opengraph" type="button" disabled>Open Graph</button>
+        </div>
+
+        <div id="dep-tab-deployment" class="dep-tab-panel active">
+          <div class="dep-details-card">
+            <div class="dep-details-head">Deployment Details</div>
+            <div class="dep-details-grid">
+              <div class="dep-kv"><div class="k">Created</div><div class="v" id="dep-created">—</div></div>
+              <div class="dep-kv"><div class="k">Status</div><div class="v" id="dep-status">—</div></div>
+              <div class="dep-kv"><div class="k">Duration</div><div class="v" id="dep-duration">—</div></div>
+              <div class="dep-kv"><div class="k">Environment</div><div class="v" id="dep-env">—</div></div>
+              <div class="dep-kv dep-kv-wide"><div class="k">Domains</div><div class="v" id="dep-domains">—</div></div>
+              <div class="dep-kv dep-kv-wide"><div class="k">Source</div><div class="v" id="dep-source">—</div></div>
+            </div>
+          </div>
+
+          <div class="dep-sections">
+            <div class="dep-card">
+              <div class="dep-card-title">Deployment Settings</div>
+              <div class="dep-card-sub">Configuration for this deployment (local dashboard).</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Build Logs</div>
+              <div class="dep-card-sub" id="dep-build-summary">—</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Deployment Summary</div>
+              <div class="dep-rows" id="dep-summary-rows"></div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Deployment Checks</div>
+              <div class="dep-card-sub">No checks configured.</div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Assigning Custom Domains</div>
+              <div class="dep-card-sub">Custom domains are managed in the Domains tab (local-only reference).</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Runtime Logs</div>
+              <div class="dep-card-sub">View and debug runtime logs & errors</div>
+            </div>
+            <div class="dep-card">
+              <div class="dep-card-title">Observability</div>
+              <div class="dep-card-sub">Monitor app health & performance</div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Speed Insights <span class="dep-pill">Not Enabled</span></div>
+              <div class="dep-card-sub">Performance metrics from real users</div>
+            </div>
+            <div class="dep-card dep-card-muted">
+              <div class="dep-card-title">Web Analytics <span class="dep-pill">Not Enabled</span></div>
+              <div class="dep-card-sub">Analyze visitors & traffic in real-time</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="dep-tab-logs" class="dep-tab-panel" style="display:none;">
+          <div class="dep-card">
+            <div class="dep-card-title">Logs</div>
+            <pre class="dep-log-pre" id="dep-logs-content">Loading…</pre>
+          </div>
+        </div>
+
+        <div id="dep-tab-source" class="dep-tab-panel" style="display:none;">
+          <div class="dep-card">
+            <div class="dep-card-title">Source</div>
+            <div class="dep-rows" id="dep-source-rows"></div>
+          </div>
         </div>
       </section>
 
-      <section id="section-domains" class="section">
-        <div class="section-header">
-          <h1 class="section-title">Domains</h1>
-          <p class="section-subtitle">Configure custom domains for your projects</p>
-        </div>
-        <div id="domains-list-wrap" class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Project</th>
-                <th>Domain</th>
-                <th>Environment</th>
-                <th>Status</th>
-                <th>SSL</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="domains-table-body"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="domains-empty" style="display:none;">
-          <div class="empty-icon">&#128202;</div>
-          <h2>No custom domains</h2>
-          <p>Add a domain to your project.</p>
+        <div class="domains-note domains-note-top" id="domains-note">Domains are stored locally for this workspace.</div>
+        <div class="domains-layout">
+          <aside class="domains-rail">
+            <h1 class="section-title">Domains</h1>
+            <p class="domains-lead">Assign domains to projects. Local-only reference (no public DNS/SSL provisioning).</p>
+            <div class="domains-steps card">
+              <div class="domains-step"><span class="domains-step-n">1</span><span>Import or select a project</span></div>
+              <div class="domains-step"><span class="domains-step-n">2</span><span>Add a domain name</span></div>
+              <div class="domains-step"><span class="domains-step-n">3</span><span>Track verification status</span></div>
+            </div>
+          </aside>
+          <div class="domains-main">
+            <div class="domains-toolbar">
+              <div class="domains-toolbar-title">Configured domains</div>
+              <button class="btn btn-primary" id="open-add-domain" type="button" style="display:none;">Add Domain</button>
+            </div>
+            <div id="domains-list-wrap" class="table-wrap">
+              <table class="data-table domains-table">
+                <thead>
+                  <tr>
+                    <th>Project</th>
+                    <th>Domain</th>
+                    <th>Environment</th>
+                    <th>Status</th>
+                    <th>SSL</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="domains-table-body">
+                  <tr><td colspan="6" style="color:var(--muted);padding:20px;text-align:center;">Loading…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
 
-        <!-- Add domain modal -->
+        <!-- Add domain modal (kept for compatibility) -->
         <div class="modal-overlay" id="add-domain-modal">
           <div class="modal">
             <div class="modal-header">
