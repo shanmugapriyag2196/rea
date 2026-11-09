@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "installCommand": "npm install",
+  "buildCommand": "echo \"vg-deploy\"",
+  "outputDirectory": "public"
+}

@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "installCommand": "npm install --prefix local-deploy-platform",
+  "installCommand": "if [ -f local-deploy-platform/package.json ]; then npm install --prefix local-deploy-platform; else npm install; fi",
   "buildCommand": "echo \"vg-deploy static+api\"",
   "functions": {
     "api/[...path].js": {
