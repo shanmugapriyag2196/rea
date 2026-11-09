@@ -104,13 +104,16 @@
       </section>
 
       <section id="section-deployment-detail" class="section dep-page">
+        <div class="dep-breadcrumb"><button class="btn btn-outline btn-sm" id="dep-back" type="button">← Deployments</button></div>
         <div class="dep-top">
-          <button class="btn btn-outline btn-sm" id="dep-back" type="button">← Deployments</button>
           <div class="dep-title-wrap">
-            <h1 class="section-title dep-title" id="dep-id">Deployment</h1>
-            <div class="dep-sub" id="dep-subtitle"></div>
+            <div class="dep-eyebrow" id="dep-subtitle">Project Deployments</div>
+            <h1 class="section-title dep-title"><span id="dep-project-name">Deployment</span> <span class="dep-id-pill" id="dep-id">—</span></h1>
+            <div class="dep-meta-line" id="dep-meta-line"></div>
           </div>
-          <div class="dep-top-actions"><a class="btn btn-primary btn-sm" id="dep-visit" href="#" target="_blank" rel="noopener" style="display:none;">Visit</a></div>
+          <div class="dep-top-actions">
+            <a class="btn btn-primary btn-sm" id="dep-visit" href="#" target="_blank" rel="noopener" style="display:none;">Visit</a>
+          </div>
         </div>
         <div class="dep-tabs" role="tablist">
           <button class="dep-tab active" data-dep-tab="deployment" type="button">Deployment</button>

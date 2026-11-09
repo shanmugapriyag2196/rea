@@ -36,6 +36,16 @@ function statusBadge(status) {
   return `<span class="status-badge status-${status || "pending"}">${labels[status] || status || "Pending"}</span>`;
 }
 
+function timeAgo(ts) {
+  if (!ts) return "";
+  const s = Math.floor((Date.now() - Number(ts)) / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24); if (d < 30) return `${d}d ago`;
+  return formatDate(ts);
+}
+
 async function api(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json", ...options.headers },
@@ -451,20 +461,25 @@ function renderDeploymentPage(d) {
   const url = status === "ready" ? `${location.origin}/deployments/${d.id}/` : "";
   const branch = d.branch || project.github_branch || "main";
   const domains = Array.isArray(d.domains) ? d.domains : [];
+  const author = d.commit?.author_name || d.commit?.authorName || project.owner || "—";
+  const age = d.created_at ? timeAgo(d.created_at) : "";
+  const msg = d.commit?.message ? (d.commit.message||"").split("\n")[0] : "";
 
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
   const txt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  txt("dep-project-name", project.name || "Deployment");
   txt("dep-id", short);
-  set("dep-subtitle", `Project Deployments · ${escapeHtml(project.name || "Project")}`);
+  set("dep-subtitle", `Project Deployments / ${escapeHtml(project.name || "Project")}`);
+  set("dep-meta-line", [author !== "—" ? escapeHtml(author) : "", age ? escapeHtml(age) : "", sha ? `Commit <code>${escapeHtml(short)}</code>` : ""].filter(Boolean).join(" · ") + (msg ? `<div class="dep-meta-msg">${escapeHtml(msg)}</div>` : ""));
   const visit = document.getElementById("dep-visit");
   if (visit) { visit.style.display = url ? "inline-flex" : "none"; if (url) visit.href = url; }
 
   txt("dep-created", d.created_at ? new Date(d.created_at).toLocaleString() : "—");
-  set("dep-status", `${statusBadge(status)}${status === "ready" ? ' <span style="color:var(--muted);font-size:12px;margin-left:6px;">Current</span>' : ''}`);
+  set("dep-status", `${statusBadge(status)}${status === "ready" ? ' <span style="color:var(--muted);font-size:12px;margin-left:6px;">Ready</span>' : ''}`);
   txt("dep-duration", formatDuration(d.build_duration_ms));
   set("dep-env", `<strong style="color:#fff;">${escapeHtml((d.environment || "production").replace(/^./, c=>c.toUpperCase()))}</strong>${status === "ready" ? ' <span class="dep-pill">Current</span>' : ''}`);
   set("dep-domains", domains.length ? domains.map(x => `<div><span style="color:#fff;">${escapeHtml(x.name || x.domain)}</span></div>`).join("") : (url ? `<a href="${url}" target="_blank" rel="noopener" style="color:#fff;">${escapeHtml(location.host)}/deployments/${escapeHtml(d.id)}/</a>` : '<span style="color:var(--muted);">No domain</span>'));
-  set("dep-source", `<div><span class="dep-pill">${escapeHtml(branch)}</span></div><div style="margin-top:6px;"><code>${escapeHtml(short)}</code> ${d.commit?.message ? `<span style="color:#ccc;">${escapeHtml((d.commit.message||'').split('\n')[0])}</span>` : ''}</div>`);
+  set("dep-source", `<div><span class="dep-pill">${escapeHtml(branch)}</span></div><div style="margin-top:6px;"><code>${escapeHtml(short)}</code> ${msg ? `<span style="color:#ccc;">${escapeHtml(msg)}</span>` : ''}</div>`);
 
   txt("dep-build-summary", status === "ready" ? `Build completed in ${formatDuration(d.build_duration_ms)} · ${d.file_count || 0} files` : (d.error_message ? d.error_message : "—"));
   set("dep-summary-rows", [
