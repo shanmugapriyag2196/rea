@@ -1,6 +1,11 @@
 {
   "version": 2,
-  "installCommand": "npm install",
-  "buildCommand": "echo \"vg-deploy\"",
-  "outputDirectory": "public"
+  "framework": null,
+  "installCommand": "echo skip",
+  "buildCommand": "echo skip",
+  "outputDirectory": "public",
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
 }

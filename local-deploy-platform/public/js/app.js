@@ -41,8 +41,14 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json", ...options.headers },
     ...options,
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || data.message || "Request failed");
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || `HTTP ${res.status}` }; }
+  if (!res.ok) {
+    const msg = data.error || data.message || `Request failed (${res.status})`;
+    if (res.status === 404 || res.status === 405) throw new Error(msg + " — API not available on static hosting. Run locally: cd local-deploy-platform && npm run dev");
+    throw new Error(msg);
+  }
   return data;
 }
 
@@ -70,13 +76,14 @@ function navigateTo(sectionId) {
 
 async function loadOverview() {
   try {
-    projects = await api("/projects");
+    const p = await api("/projects");
+    projects = Array.isArray(p) ? p : (p && Array.isArray(p.projects) ? p.projects : []);
     let allDeployments = [];
-    for (const p of projects) {
+    for (const proj of projects) {
       try {
-        const data = await api(`/projects/${p.id}/deployments`);
+        const data = await api(`/projects/${proj.id}/deployments`);
         const deps = Array.isArray(data) ? data : data.deployments || [];
-        deps.forEach((d) => (d.projectName = p.name));
+        deps.forEach((d) => (d.projectName = proj.name));
         allDeployments.push(...deps);
       } catch {}
     }
@@ -116,7 +123,8 @@ async function loadOverview() {
 
 async function loadProjects() {
   try {
-    projects = await api("/projects");
+    const p = await api("/projects");
+    projects = Array.isArray(p) ? p : (p && Array.isArray(p.projects) ? p.projects : []);
     const tbody = document.getElementById("projects-table-body");
     const empty = document.getElementById("projects-empty");
     const list = document.getElementById("projects-list");
