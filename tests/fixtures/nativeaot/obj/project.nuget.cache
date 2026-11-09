@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "FCmlvjiwgU4=",
+  "dgSpecHash": "4yMjDlceYFc=",
   "success": true,
-  "projectFilePath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
+  "projectFilePath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\priyag\\.nuget\\packages\\microsoft.dotnet.ilcompiler\\8.0.22\\microsoft.dotnet.ilcompiler.8.0.22.nupkg.sha512",
     "C:\\Users\\priyag\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.22\\microsoft.net.illink.tasks.8.0.22.nupkg.sha512",
@@ -14,9 +14,9 @@
       "code": "NU1903",
       "level": "Warning",
       "message": "Package 'Microsoft.DotNet.ILCompiler' 8.0.22 has a known high severity vulnerability, https://github.com/advisories/GHSA-p3jp-9v83-76w9",
-      "projectPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
+      "projectPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
       "warningLevel": 1,
-      "filePath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
+      "filePath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
       "libraryId": "Microsoft.DotNet.ILCompiler",
       "targetGraphs": [
         "net8.0"

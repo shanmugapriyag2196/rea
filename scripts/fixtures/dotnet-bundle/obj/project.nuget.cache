@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "jr2ACI8taNc=",
+  "dgSpecHash": "MOEXi+5S79E=",
   "success": true,
-  "projectFilePath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj",
+  "projectFilePath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj",
   "expectedPackageFiles": [],
   "logs": []
 }
