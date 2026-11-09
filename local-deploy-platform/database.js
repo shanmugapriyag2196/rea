@@ -6,11 +6,15 @@ const crypto = require("crypto");
 
 const initSqlJs = require("sql.js");
 
-const DB_PATH = path.join(__dirname, "data", "platform.db");
+const IS_VERCEL = !!process.env.VERCEL;
+const TMP_BASE = process.env.TMPDIR || process.env.TEMP || "/tmp";
+const DB_PATH = process.env.DB_PATH || (IS_VERCEL ? path.join(TMP_BASE, "vg-platform.db") : path.join(__dirname, "data", "platform.db"));
 
 function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
+  try {
+    if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
   }
 }
 
@@ -19,13 +23,27 @@ ensureDir(path.dirname(DB_PATH));
 let db = null;
 let initialized = false;
 const initPromise = (async () => {
-  const SQLModule = await initSqlJs();
+  // Locate sql.js wasm reliably in local and serverless bundles.
+  let wasmBinary;
+  try {
+    const wasmPath = require.resolve("sql.js/dist/sql-wasm.wasm");
+    wasmBinary = fs.readFileSync(wasmPath);
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
+    console.warn("[vg-deploy] sql-wasm.wasm not found in bundle; DB disabled on Vercel.", e.message);
+    return;
+  }
+  const SQLModule = await initSqlJs({ wasmBinary });
   db = new SQLModule.Database();
 
-  // Load existing database if present
-  if (fs.existsSync(DB_PATH)) {
-    const fileContents = fs.readFileSync(DB_PATH);
-    db = new SQLModule.Database(fileContents);
+  // Load existing database if present (best-effort; Vercel /tmp is ephemeral)
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const fileContents = fs.readFileSync(DB_PATH);
+      db = new SQLModule.Database(fileContents);
+    }
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
   }
 
   initSchema();
@@ -149,7 +167,7 @@ function saveDb() {
     const data = db.export();
     fs.writeFileSync(DB_PATH, Buffer.from(data));
   } catch (e) {
-    // Ignore save errors
+    // Ignore save errors (e.g. read-only serverless filesystem)
   }
 }
 
@@ -162,6 +180,7 @@ function generateId() {
 }
 
 function run(sql, params = []) {
+  if (!db) return;
   const stmt = db.prepare(sql);
   stmt.bind(params);
   stmt.step();
@@ -169,6 +188,7 @@ function run(sql, params = []) {
 }
 
 function get(sql, params = []) {
+  if (!db) return undefined;
   const stmt = db.prepare(sql);
   stmt.bind(params);
   const hasRow = stmt.step();
@@ -182,6 +202,7 @@ function get(sql, params = []) {
 }
 
 function all(sql, params = []) {
+  if (!db) return [];
   const stmt = db.prepare(sql);
   stmt.bind(params);
   const rows = [];

@@ -41,18 +41,27 @@ const {
   generateId,
 } = require("./database");
 
+const IS_VERCEL = !!process.env.VERCEL;
 const PORT = parseInt(process.env.PORT, 10) || 3456;
 const HOST = process.env.HOST || "127.0.0.1";
-const WORKSPACE_DIR = process.env.WORKSPACE_DIR || path.join(__dirname, "workspaces");
-const ARTIFACT_DIR = process.env.ARTIFACT_DIR || path.join(__dirname, "public", "deployments");
-const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, "logs");
+const TMP_BASE = process.env.TMPDIR || process.env.TEMP || "/tmp";
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || (IS_VERCEL ? path.join(TMP_BASE, "vg-workspaces") : path.join(__dirname, "workspaces"));
+const ARTIFACT_DIR = process.env.ARTIFACT_DIR || (IS_VERCEL ? path.join(TMP_BASE, "vg-deployments") : path.join(__dirname, "public", "deployments"));
+const LOG_DIR = process.env.LOG_DIR || (IS_VERCEL ? path.join(TMP_BASE, "vg-logs") : path.join(__dirname, "logs"));
 const BUILD_TIMEOUT_MS = parseInt(process.env.BUILD_TIMEOUT_MS, 10) || 300000;
 const BUILD_MAX_MEMORY_MB = parseInt(process.env.BUILD_MAX_MEMORY_MB, 10) || 512;
 
-for (const dir of [WORKSPACE_DIR, ARTIFACT_DIR, LOG_DIR]) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+function ensureWritableDir(dir) {
+  try {
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    if (!IS_VERCEL) throw e;
+    console.warn(`[vg-deploy] Could not create dir ${dir}: ${e.message}`);
   }
+}
+
+for (const dir of [WORKSPACE_DIR, ARTIFACT_DIR, LOG_DIR]) {
+  ensureWritableDir(dir);
 }
 
 async function fetchCommitsFromGitHub(owner, repo, token, branch = "main", perPage = 100) {
@@ -109,7 +118,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // Multer config for ZIP uploads
 const upload = multer({
-  dest: path.join(__dirname, "logs", "tmp-uploads"),
+  dest: tmpUploadDir,
   limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -122,10 +131,8 @@ const upload = multer({
 });
 
 // Ensure tmp upload dir exists
-const tmpUploadDir = path.join(__dirname, "logs", "tmp-uploads");
-if (!fs.existsSync(tmpUploadDir)) {
-  fs.mkdirSync(tmpUploadDir, { recursive: true });
-}
+const tmpUploadDir = IS_VERCEL ? path.join(TMP_BASE, "vg-tmp-uploads") : path.join(__dirname, "logs", "tmp-uploads");
+ensureWritableDir(tmpUploadDir);
 // ---------- Helpers ----------
 
 function isSafeZipEntry(entryName) {
@@ -1085,25 +1092,25 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Internal server error", message: err.message });
 });
 
+module.exports = app;
+
 // ---------- Start server after database initialization ----------
-initPromise.then(() => {
-  const server = app.listen(PORT, HOST, () => {
-    console.log(`VG Deployment App running at http://${HOST}:${PORT}/`);
-    console.log(`Bound to ${HOST}:${PORT} (local-only)`);
-  });
-
-  process.on("SIGTERM", () => {
-    server.close(() => {
-      process.exit(0);
+if (require.main === module) {
+  initPromise.then(() => {
+    const server = app.listen(PORT, HOST, () => {
+      console.log(`VG Deployment App running at http://${HOST}:${PORT}/`);
+      console.log(`Bound to ${HOST}:${PORT} (local-only)`);
     });
-  });
 
-  process.on("SIGINT", () => {
-    server.close(() => {
-      process.exit(0);
-    });
+    process.on("SIGTERM", () => server.close(() => process.exit(0)));
+    process.on("SIGINT", () => server.close(() => process.exit(0)));
+  }).catch((err) => {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
   });
-}).catch((err) => {
-  console.error("Failed to initialize database:", err);
-  process.exit(1);
-});
+} else {
+  // Serverless/runtime import (e.g. Vercel): don't exit; UI may still render, APIs depend on writable runtime.
+  initPromise.catch((err) => {
+    console.error("Database init failed (continuing in serverless mode):", err && err.message ? err.message : err);
+  });
+}
