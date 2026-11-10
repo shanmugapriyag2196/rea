@@ -4,7 +4,7 @@
   "buildCommand": "echo \"vg-deploy api\"",
   "functions": {
     "api/[...path].js": {
-      "includeFiles": "{server.js,database.js,worker.js,integrations/**,public/**,node_modules/sql.js/**}"
+      "includeFiles": "{server.js,database.js,worker.js,integrations/**,public/**,node_modules/**}"
     }
   },
   "routes": [
