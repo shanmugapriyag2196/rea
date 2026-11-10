@@ -133,58 +133,30 @@ function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_commits_project ON repository_commits(project_id);
   `);
 
-  // Integration/config tables (local-only dashboard integration layer)
+  // Add GitHub columns to existing projects tables (migration)
   try {
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS app_settings (
-        key TEXT PRIMARY KEY,
-        value TEXT,
-        updated_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS integration_mappings (
-        id TEXT PRIMARY KEY,
-        provider TEXT NOT NULL,
-        local_type TEXT NOT NULL,
-        local_id TEXT NOT NULL,
-        remote_id TEXT,
-        remote_key TEXT,
-        meta TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(provider, local_type, local_id)
-      );
-      CREATE TABLE IF NOT EXISTS integration_sync_state (
-        provider TEXT PRIMARY KEY,
-        last_sync_at INTEGER,
-        last_status TEXT,
-        last_error TEXT,
-        last_summary TEXT,
-        updated_at INTEGER NOT NULL
-      );
-    `);
-  } catch (e) {}
-
-  // Add GitHub/integration columns to existing projects tables (migration)
-  try { db.exec(`ALTER TABLE projects ADD COLUMN github_repo_url TEXT;`); } catch (e) {}
-  try { db.exec(`ALTER TABLE projects ADD COLUMN github_token TEXT;`); } catch (e) {}
-  try { db.exec(`ALTER TABLE projects ADD COLUMN github_branch TEXT DEFAULT 'main';`); } catch (e) {}
-  try { db.exec(`ALTER TABLE projects ADD COLUMN github_last_synced_at INTEGER;`); } catch (e) {}
-  try { db.exec(`ALTER TABLE projects ADD COLUMN slug TEXT;`); } catch (e) {}
-  try { db.exec(`ALTER TABLE projects ADD COLUMN vercel_project_id TEXT;`); } catch (e) {}
-  try { db.exec(`ALTER TABLE projects ADD COLUMN vercel_team_id TEXT;`); } catch (e) {}
+    db.exec(`ALTER TABLE projects ADD COLUMN github_repo_url TEXT;`);
+  } catch (e) {
+    // Column may already exist
+  }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_token TEXT;`);
+  } catch (e) {
+    // Column may already exist
+  }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_branch TEXT DEFAULT 'main';`);
+  } catch (e) {
+    // Column may already exist
+  }
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN github_last_synced_at INTEGER;`);
+  } catch (e) {
+    // Column may already exist
+  }
   try { db.exec(`ALTER TABLE deployments ADD COLUMN commit_sha TEXT;`); } catch (e) {}
   try { db.exec(`ALTER TABLE deployments ADD COLUMN branch TEXT;`); } catch (e) {}
   try { db.exec(`ALTER TABLE deployments ADD COLUMN environment TEXT DEFAULT 'production';`); } catch (e) {}
-
-  // Backfill slugs for existing projects
-  try {
-    const rows = all("SELECT id, name, slug FROM projects");
-    for (const r of rows || []) {
-      if (!r.slug) {
-        run("UPDATE projects SET slug = ? WHERE id = ?", [slugify(r.name || r.id), r.id]);
-      }
-    }
-  } catch (e) {}
 
   saveDb();
 }
@@ -205,16 +177,6 @@ function now() {
 
 function generateId() {
   return crypto.randomBytes(16).toString("hex");
-}
-
-function slugify(value) {
-  const s = String(value || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80);
-  return s || `project-${generateId().slice(0, 8)}`;
 }
 
 function run(sql, params = []) {
@@ -256,18 +218,10 @@ function all(sql, params = []) {
 function createProject(name, description = "", framework = "static") {
   const id = generateId();
   const ts = now();
-  const slug = slugify(name);
-  try {
-    run(
-      "INSERT INTO projects (id, name, slug, description, framework, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-      [id, name, slug, description, framework, ts, ts]
-    );
-  } catch (e) {
-    run(
-      "INSERT INTO projects (id, name, description, framework, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [id, name, description, framework, ts, ts]
-    );
-  }
+  run(
+    "INSERT INTO projects (id, name, description, framework, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    [id, name, description, framework, ts, ts]
+  );
   saveDb();
   return getProjectById(id);
 }
@@ -517,119 +471,6 @@ function deleteCommits(projectId) {
   saveDb();
 }
 
-// ---- Integration settings/mappings (local-only) ----
-
-function maskSecret(value) {
-  const s = String(value || "");
-  if (!s) return "";
-  if (s.length <= 8) return "••••••••";
-  return `${s.slice(0, 4)}••••${s.slice(-4)}`;
-}
-
-function getSetting(key) {
-  const row = get("SELECT value FROM app_settings WHERE key = ?", [key]);
-  return row ? row.value : null;
-}
-
-function setSetting(key, value) {
-  run(
-    "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-    [key, value == null ? null : String(value), now()]
-  );
-  saveDb();
-}
-
-function getSettings(keys) {
-  const out = {};
-  for (const k of keys || []) out[k] = getSetting(k);
-  return out;
-}
-
-function getIntegrationConfig(provider) {
-  const prefix = `${provider}.`;
-  const rows = all("SELECT key, value FROM app_settings WHERE key LIKE ?", [`${prefix}%`]);
-  const cfg = {};
-  for (const r of rows || []) cfg[r.key.slice(prefix.length)] = r.value;
-  return cfg;
-}
-
-function setIntegrationConfig(provider, config) {
-  for (const [k, v] of Object.entries(config || {})) {
-    setSetting(`${provider}.${k}`, v);
-  }
-  return getIntegrationConfig(provider);
-}
-
-function getSyncState(provider) {
-  return get("SELECT * FROM integration_sync_state WHERE provider = ?", [provider]) || null;
-}
-
-function setSyncState(provider, { status, error, summary }) {
-  const ts = now();
-  const existing = getSyncState(provider);
-  if (existing) {
-    run(
-      "UPDATE integration_sync_state SET last_sync_at = ?, last_status = ?, last_error = ?, last_summary = ?, updated_at = ? WHERE provider = ?",
-      [ts, status || null, error || null, summary || null, ts, provider]
-    );
-  } else {
-    run(
-      "INSERT INTO integration_sync_state (provider, last_sync_at, last_status, last_error, last_summary, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-      [provider, ts, status || null, error || null, summary || null, ts]
-    );
-  }
-  saveDb();
-  return getSyncState(provider);
-}
-
-function upsertMapping(provider, localType, localId, remoteId, remoteKey, meta) {
-  const ts = now();
-  const existing = get(
-    "SELECT id FROM integration_mappings WHERE provider = ? AND local_type = ? AND local_id = ?",
-    [provider, localType, localId]
-  );
-  const metaJson = meta == null ? null : JSON.stringify(meta);
-  if (existing) {
-    run(
-      "UPDATE integration_mappings SET remote_id = ?, remote_key = ?, meta = ?, updated_at = ? WHERE id = ?",
-      [remoteId || null, remoteKey || null, metaJson, ts, existing.id]
-    );
-    return get("SELECT * FROM integration_mappings WHERE id = ?", [existing.id]);
-  }
-  const id = generateId();
-  run(
-    "INSERT INTO integration_mappings (id, provider, local_type, local_id, remote_id, remote_key, meta, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    [id, provider, localType, localId, remoteId || null, remoteKey || null, metaJson, ts, ts]
-  );
-  saveDb();
-  return get("SELECT * FROM integration_mappings WHERE id = ?", [id]);
-}
-
-function getMapping(provider, localType, localId) {
-  return get(
-    "SELECT * FROM integration_mappings WHERE provider = ? AND local_type = ? AND local_id = ?",
-    [provider, localType, localId]
-  );
-}
-
-function listMappings(provider, localType) {
-  if (localType) {
-    return all("SELECT * FROM integration_mappings WHERE provider = ? AND local_type = ? ORDER BY updated_at DESC", [provider, localType]);
-  }
-  return all("SELECT * FROM integration_mappings WHERE provider = ? ORDER BY updated_at DESC", [provider]);
-}
-
-function getPublicIntegrationConfig(provider) {
-  const cfg = getIntegrationConfig(provider);
-  const out = { ...cfg };
-  if (out.pat) { out.patMasked = maskSecret(out.pat); delete out.pat; }
-  if (out.token) { out.tokenMasked = maskSecret(out.token); delete out.token; }
-  if (out.github_token) { out.github_tokenMasked = maskSecret(out.github_token); delete out.github_token; }
-  out.configured = provider === "airtable" ? !!(cfg.pat && cfg.baseId) : !!(cfg.token);
-  out.sync = getSyncState(provider);
-  return out;
-}
-
 // Close on process exit
 process.on("exit", () => {
   if (db) {
@@ -670,19 +511,6 @@ module.exports = {
   listAllCommits,
   deleteCommits,
   getDeploymentByCommit,
-  getSetting,
-  setSetting,
-  getSettings,
-  getIntegrationConfig,
-  setIntegrationConfig,
-  getPublicIntegrationConfig,
-  getSyncState,
-  setSyncState,
-  upsertMapping,
-  getMapping,
-  listMappings,
-  maskSecret,
-  slugify,
   now,
   generateId,
 };

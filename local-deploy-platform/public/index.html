@@ -104,16 +104,13 @@
       </section>
 
       <section id="section-deployment-detail" class="section dep-page">
-        <div class="dep-breadcrumb"><button class="btn btn-outline btn-sm" id="dep-back" type="button">← Deployments</button></div>
         <div class="dep-top">
+          <button class="btn btn-outline btn-sm" id="dep-back" type="button">← Deployments</button>
           <div class="dep-title-wrap">
-            <div class="dep-eyebrow" id="dep-subtitle">Project Deployments</div>
-            <h1 class="section-title dep-title"><span id="dep-project-name">Deployment</span> <span class="dep-id-pill" id="dep-id">—</span></h1>
-            <div class="dep-meta-line" id="dep-meta-line"></div>
+            <h1 class="section-title dep-title" id="dep-id">Deployment</h1>
+            <div class="dep-sub" id="dep-subtitle"></div>
           </div>
-          <div class="dep-top-actions">
-            <a class="btn btn-primary btn-sm" id="dep-visit" href="#" target="_blank" rel="noopener" style="display:none;">Visit</a>
-          </div>
+          <div class="dep-top-actions"><a class="btn btn-primary btn-sm" id="dep-visit" href="#" target="_blank" rel="noopener" style="display:none;">Visit</a></div>
         </div>
         <div class="dep-tabs" role="tablist">
           <button class="dep-tab active" data-dep-tab="deployment" type="button">Deployment</button>
@@ -150,68 +147,10 @@
         <div id="dep-tab-source" class="dep-tab-panel" style="display:none;"><div class="dep-card"><div class="dep-card-title">Source</div><div class="dep-rows" id="dep-source-rows"></div></div></div>
       </section>
 
-      <section id="section-integrations" class="section">
-        <div class="section-header"><h1 class="section-title">Integrations</h1><p class="section-subtitle">Database integration layer (Airtable) and Vercel connection for this dashboard. Credentials are stored locally only.</p></div>
-
-        <div class="card integ-card">
-          <div class="integ-head"><div><h3>Airtable Database Sync</h3><p class="muted">Sync Projects, Deployments, and Commits to your Airtable base.</p></div><span id="airtable-status-badge" class="status-badge status-pending">Not configured</span></div>
-          <div class="integ-grid">
-            <label>Personal Access Token<input id="airtable-pat" type="password" placeholder="pat..." autocomplete="off"></label>
-            <label>Base ID<input id="airtable-base-id" type="text" placeholder="app..."></label>
-            <label>Projects Table ID<input id="airtable-projects-table" type="text" placeholder="tbl..."></label>
-            <label>Deployments Table ID<input id="airtable-deployments-table" type="text" placeholder="tbl..."></label>
-            <label>Commits Table ID<input id="airtable-commits-table" type="text" placeholder="tbl..."></label>
-          </div>
-          <div class="integ-actions">
-            <button class="btn btn-primary" id="airtable-save-btn" type="button">Save Config</button>
-            <button class="btn btn-outline" id="airtable-test-btn" type="button">Test Connection</button>
-            <button class="btn btn-outline" id="airtable-sync-btn" type="button">Sync Now</button>
-          </div>
-          <div id="airtable-sync-status" class="integ-status muted">No sync yet.</div>
-        </div>
-
-        <div class="card integ-card">
-          <div class="integ-head"><div><h3>Vercel Platform</h3><p class="muted">Connect Vercel to manage project environment variables from the dashboard.</p></div><span id="vercel-status-badge" class="status-badge status-pending">Not configured</span></div>
-          <div class="integ-grid">
-            <label>Vercel Access Token<input id="vercel-token" type="password" placeholder="Token" autocomplete="off"></label>
-            <label>Team ID (optional)<input id="vercel-team-id" type="text" placeholder="team_... or leave blank"></label>
-          </div>
-          <div class="integ-actions">
-            <button class="btn btn-primary" id="vercel-save-btn" type="button">Save Config</button>
-            <button class="btn btn-outline" id="vercel-test-btn" type="button">Test Connection</button>
-          </div>
-          <div id="vercel-conn-status" class="integ-status muted">Not connected.</div>
-        </div>
-
-        <div class="card integ-card">
-          <div class="integ-head"><div><h3>Project Mapping &amp; Vercel Environment Variables</h3><p class="muted">Map a local project to a Vercel project and manage its env vars.</p></div></div>
-          <div class="integ-grid">
-            <label>Local Project<select id="integ-project-select"><option value="">Select a project</option></select></label>
-            <label>Project Slug<input id="integ-project-slug" type="text" placeholder="project-slug"></label>
-            <label>Vercel Project ID<input id="integ-vercel-project-id" type="text" placeholder="prj_..."></label>
-            <label>Vercel Team ID (override)<input id="integ-vercel-team-id" type="text" placeholder="team_..."></label>
-          </div>
-          <div class="integ-actions" style="margin-bottom:16px;">
-            <button class="btn btn-outline" id="integ-save-mapping-btn" type="button">Save Mapping</button>
-            <button class="btn btn-outline" id="vercel-env-refresh-btn" type="button">Load Vercel Env Vars</button>
-          </div>
-          <div class="integ-subhead">Add / Update Vercel Environment Variable</div>
-          <div class="integ-grid">
-            <label>Key<input id="vercel-env-key" type="text" placeholder="API_KEY"></label>
-            <label>Value<input id="vercel-env-value" type="password" placeholder="value" autocomplete="off"></label>
-            <label>Target<select id="vercel-env-target"><option value="production,preview,development">All (production, preview, development)</option><option value="production">production</option><option value="preview">preview</option><option value="development">development</option></select></label>
-            <label>Type<select id="vercel-env-type"><option value="encrypted">encrypted</option><option value="plain">plain</option><option value="sensitive">sensitive</option></select></label>
-          </div>
-          <div class="integ-actions" style="margin-bottom:12px;"><button class="btn btn-primary" id="vercel-env-add-btn" type="button">Add / Upsert Env Var</button></div>
-          <div id="vercel-env-status" class="integ-status muted">Select a project, save mapping (Vercel Project ID), then load env vars.</div>
-          <div id="vercel-env-table-wrap" class="table-wrap" style="margin-top:12px; display:none;"><table class="data-table"><thead><tr><th>Key</th><th>Target</th><th>Type</th><th>Value</th><th>Actions</th></tr></thead><tbody id="vercel-env-table-body"></tbody></table></div>
-        </div>
-
-        <div class="card"><h3>GitHub</h3><p class="muted">Connect GitHub in local mode to import repositories and view commits (Projects → Import Git Repository).</p></div>
-      </section>
+      <section id="section-integrations" class="section"><div class="section-header"><h1 class="section-title">Integrations</h1></div><div class="card"><h3>GitHub</h3><p style="color:var(--muted);">Connect GitHub in local mode to import repositories and view commits.</p></div></section>
       <section id="section-domains" class="section"><div class="section-header"><h1 class="section-title">Domains</h1></div><div class="domains-note domains-note-top" id="domains-note">Domains are stored locally for this workspace.</div><div id="domains-list-wrap" class="table-wrap"><table class="data-table domains-table"><thead><tr><th>Project</th><th>Domain</th><th>Environment</th><th>Status</th><th>SSL</th><th>Actions</th></tr></thead><tbody id="domains-table-body"><tr><td colspan="6" style="color:var(--muted);padding:20px;text-align:center;">No domains</td></tr></tbody></table></div></section>
       <section id="section-observability" class="section"><div class="section-header"><h1 class="section-title">Observability</h1></div><div class="card" style="color:var(--muted);">Runtime logs and analytics require the local Node backend.</div></section>
-      <section id="section-settings" class="section"><div class="section-header"><h1 class="section-title">Settings</h1></div><div class="card"><h3>General</h3><p class="muted">VG Deployment dashboard. Full API features (import, deploy, git sync, persistent data, Airtable/Vercel integrations) run in local mode: <code>npm run dev</code> in <code>local-deploy-platform</code> → http://127.0.0.1:3456/</p><p class="muted" style="margin-top:8px;">Configure database sync (Airtable) and Vercel environment variables in <strong>Integrations</strong>.</p></div><div class="card"><h3>Integration Status</h3><div id="settings-integration-status" class="muted">Open Integrations to load status.</div></div></section>
+      <section id="section-settings" class="section"><div class="section-header"><h1 class="section-title">Settings</h1></div><div class="card"><h3>General</h3><p style="color:var(--muted);">VG Deployment dashboard. Full API features (import, deploy, git sync, persistent data) run in local mode: <code>npm run dev</code> in <code>local-deploy-platform</code> → http://127.0.0.1:3456/</p></div></section>
 
       <div id="project-detail" style="display:none;">
         <button class="btn btn-outline" id="back-to-projects" type="button" style="margin-bottom:16px;">← Back</button>

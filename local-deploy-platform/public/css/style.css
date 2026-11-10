@@ -254,15 +254,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--border-hover); }
 #section-commits .section-header { margin-bottom: 8px; margin-top: 0; }
 #section-commits .section-subtitle { margin-bottom: 0; }
 /* Deployment detail (Vercel-like, local) */
-.dep-page { max-width: 1120px; }
-.dep-breadcrumb { margin-bottom: 10px; }
+.dep-page { max-width: 1100px; }
 .dep-top { display:flex; align-items:flex-start; gap:14px; margin-bottom: 14px; }
 .dep-title-wrap { flex:1; min-width:0; }
-.dep-eyebrow { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
-.dep-title { font-size: 28px; margin:0; letter-spacing:-0.03em; word-break:break-word; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.dep-id-pill { font-size:12px; font-weight:500; color:#ededed; background:#111; border:1px solid #2a2a2a; border-radius:999px; padding:4px 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.dep-meta-line { color: var(--muted); font-size: 13px; margin-top: 6px; }
-.dep-meta-msg { color:#ccc; margin-top:4px; }
+.dep-title { font-size: 22px; margin:0; letter-spacing:-0.02em; word-break:break-all; }
+.dep-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
 .dep-top-actions { display:flex; gap:8px; }
 .dep-tabs { display:flex; gap:18px; border-bottom:1px solid var(--border); margin: 8px 0 18px; }
 .dep-tab { background:none; border:none; color:var(--muted); font-size:13px; padding:10px 0; margin-bottom:-1px; border-bottom:2px solid transparent; cursor:pointer; }
@@ -292,16 +288,3 @@ input:focus, select:focus, textarea:focus { border-color: var(--border-hover); }
 .commit-open-deploy:hover { text-decoration:underline; }
 @media (max-width: 900px) { .dep-details-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .dep-kv-wide{grid-column:span 2;} .dep-kv:nth-child(4n){border-right:1px solid #111;} .dep-kv:nth-child(2n){border-right:none;} }
 
-
-/* Integration layer */
-.muted { color: var(--muted); font-size: 13px; }
-.integ-card { margin-bottom: 16px; }
-.integ-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
-.integ-head h3 { font-size: 16px; margin-bottom: 4px; }
-.integ-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
-.integ-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
-.integ-grid input, .integ-grid select { width: 100%; }
-.integ-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.integ-status { margin-top: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
-.integ-subhead { font-size: 13px; font-weight: 500; color: #fff; margin: 8px 0 10px; }
-.status-info { color: #888; border: 1px solid #333; background: #111; }
