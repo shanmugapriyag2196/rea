@@ -82,6 +82,8 @@ function navigateTo(sectionId) {
   if (sectionId === "deployments") loadDeployments();
   if (sectionId === "domains") loadDomains();
   if (sectionId === "env") loadEnvProjects();
+  if (sectionId === "integrations") loadIntegrations();
+  if (sectionId === "settings") loadIntegrations();
 }
 
 async function loadOverview() {
@@ -691,3 +693,212 @@ document.addEventListener("DOMContentLoaded", () => {
   loadOverview();
 });
 
+
+// ---------- Integration layer (Airtable DB + Vercel) ----------
+let integrationStatusCache = null;
+
+function setBadge(id, ok, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text || (ok ? "Configured" : "Not configured");
+  el.className = `status-badge ${ok ? "status-ready" : "status-pending"}`;
+}
+
+function formatSyncStatus(sync) {
+  if (!sync) return "No sync yet.";
+  const when = sync.last_sync_at ? new Date(sync.last_sync_at).toLocaleString() : "never";
+  let summary = "";
+  try { summary = sync.last_summary ? JSON.stringify(JSON.parse(sync.last_summary), null, 2) : ""; } catch { summary = sync.last_summary || ""; }
+  return [`Status: ${sync.last_status || "unknown"}`, `Last: ${when}`, sync.last_error ? `Error: ${sync.last_error}` : "", summary ? `Summary: ${summary}` : ""].filter(Boolean).join("\n");
+}
+
+async function loadIntegrations() {
+  try {
+    const status = await api("/integrations/status");
+    integrationStatusCache = status;
+    const a = status.airtable || {};
+    const v = status.vercel || {};
+    setBadge("airtable-status-badge", a.configured, a.configured ? "Configured" : "Not configured");
+    setBadge("vercel-status-badge", v.configured, v.configured ? "Configured" : "Not configured");
+    const setVal = (id, val) => { const el = document.getElementById(id); if (el && document.activeElement !== el) el.value = val ?? ""; };
+    setVal("airtable-base-id", a.baseId || "");
+    setVal("airtable-projects-table", a.projectsTable || "");
+    setVal("airtable-deployments-table", a.deploymentsTable || "");
+    setVal("airtable-commits-table", a.commitsTable || "");
+    if (a.patMasked) { const p = document.getElementById("airtable-pat"); if (p) p.placeholder = `Configured (${a.patMasked}) - leave blank to keep`; }
+    setVal("vercel-team-id", a.teamId || v.teamId || "");
+    if (v.tokenMasked) { const t = document.getElementById("vercel-token"); if (t) t.placeholder = `Configured (${v.tokenMasked}) - leave blank to keep`; }
+    const as = document.getElementById("airtable-sync-status"); if (as) as.textContent = formatSyncStatus(a.sync);
+    const vs = document.getElementById("vercel-conn-status"); if (vs) vs.textContent = formatSyncStatus(v.sync);
+    const ss = document.getElementById("settings-integration-status"); if (ss) ss.textContent = `Airtable: ${a.configured ? "configured" : "not configured"} (${a.sync?.last_status || "no sync"})\nVercel: ${v.configured ? "configured" : "not configured"} (${v.sync?.last_status || "not tested"})`;
+
+    const sel = document.getElementById("integ-project-select");
+    if (sel) {
+      const prev = sel.value;
+      const list = status.projects || projects || [];
+      sel.innerHTML = '<option value="">Select a project</option>' + list.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}${p.slug ? ` (${escapeHtml(p.slug)})` : ""}</option>`).join("");
+      if (prev && list.some(p => p.id === prev)) sel.value = prev;
+      else if (currentProjectId && list.some(p => p.id === currentProjectId)) sel.value = currentProjectId;
+      if (sel.value) fillIntegProjectFields(sel.value, list);
+    }
+  } catch (err) {
+    showToast("Failed to load integration status: " + err.message, "error");
+  }
+}
+
+function fillIntegProjectFields(projectId, list) {
+  const p = (list || integrationStatusCache?.projects || projects || []).find(x => x.id === projectId);
+  if (!p) return;
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ""; };
+  set("integ-project-slug", p.slug || "");
+  set("integ-vercel-project-id", p.vercel_project_id || "");
+  set("integ-vercel-team-id", p.vercel_team_id || "");
+}
+
+async function saveAirtableConfig() {
+  try {
+    const pat = document.getElementById("airtable-pat")?.value || "";
+    const body = {
+      baseId: document.getElementById("airtable-base-id")?.value || "",
+      projectsTable: document.getElementById("airtable-projects-table")?.value || "",
+      deploymentsTable: document.getElementById("airtable-deployments-table")?.value || "",
+      commitsTable: document.getElementById("airtable-commits-table")?.value || "",
+    };
+    if (pat) body.pat = pat;
+    await api("/integrations/airtable/config", { method: "POST", body: JSON.stringify(body) });
+    const p = document.getElementById("airtable-pat"); if (p) p.value = "";
+    showToast("Airtable config saved", "success");
+    await loadIntegrations();
+  } catch (err) { showToast("Failed to save Airtable config: " + err.message, "error"); }
+}
+
+async function testAirtable() {
+  try {
+    showToast("Testing Airtable connection...", "info");
+    const r = await api("/integrations/airtable/test", { method: "POST", body: JSON.stringify({}) });
+    showToast("Airtable connected" + (r.result?.baseId ? ` (${r.result.baseId})` : ""), "success");
+    await loadIntegrations();
+  } catch (err) { showToast("Airtable test failed: " + err.message, "error"); await loadIntegrations(); }
+}
+
+async function syncAirtable() {
+  try {
+    showToast("Syncing to Airtable...", "info");
+    const r = await api("/integrations/airtable/sync", { method: "POST", body: JSON.stringify({}) });
+    const s = r.summary || {};
+    showToast(`Airtable sync ${r.ok ? "complete" : "partial"}: projects ${s.projects?.total||0}, deployments ${s.deployments?.total||0}, commits ${s.commits?.total||0}`, r.ok ? "success" : "error");
+    await loadIntegrations();
+  } catch (err) { showToast("Airtable sync failed: " + err.message, "error"); await loadIntegrations(); }
+}
+
+async function saveVercelConfig() {
+  try {
+    const token = document.getElementById("vercel-token")?.value || "";
+    const body = { teamId: document.getElementById("vercel-team-id")?.value || "" };
+    if (token) body.token = token;
+    await api("/integrations/vercel/config", { method: "POST", body: JSON.stringify(body) });
+    const t = document.getElementById("vercel-token"); if (t) t.value = "";
+    showToast("Vercel config saved", "success");
+    await loadIntegrations();
+  } catch (err) { showToast("Failed to save Vercel config: " + err.message, "error"); }
+}
+
+async function testVercel() {
+  try {
+    showToast("Testing Vercel connection...", "info");
+    const r = await api("/integrations/vercel/test", { method: "POST", body: JSON.stringify({}) });
+    showToast("Vercel connected" + (r.result?.user ? ` as ${r.result.user}` : ""), "success");
+    await loadIntegrations();
+  } catch (err) { showToast("Vercel test failed: " + err.message, "error"); await loadIntegrations(); }
+}
+
+async function saveProjectVercelMapping() {
+  const projectId = document.getElementById("integ-project-select")?.value;
+  if (!projectId) return showToast("Select a local project first", "error");
+  try {
+    await api(`/projects/${projectId}/integrations/vercel`, {
+      method: "PUT",
+      body: JSON.stringify({
+        slug: document.getElementById("integ-project-slug")?.value || "",
+        vercel_project_id: document.getElementById("integ-vercel-project-id")?.value || "",
+        vercel_team_id: document.getElementById("integ-vercel-team-id")?.value || "",
+      }),
+    });
+    showToast("Project mapping saved", "success");
+    await loadIntegrations();
+  } catch (err) { showToast("Failed to save mapping: " + err.message, "error"); }
+}
+
+async function loadVercelEnvVars() {
+  const projectId = document.getElementById("integ-project-select")?.value;
+  const status = document.getElementById("vercel-env-status");
+  const wrap = document.getElementById("vercel-env-table-wrap");
+  const tbody = document.getElementById("vercel-env-table-body");
+  if (!projectId) { if (status) status.textContent = "Select a project first."; if (wrap) wrap.style.display = "none"; return; }
+  try {
+    if (status) status.textContent = "Loading Vercel environment variables...";
+    const data = await api(`/projects/${projectId}/integrations/vercel/env`);
+    const envs = Array.isArray(data.envs) ? data.envs : [];
+    if (tbody) {
+      tbody.innerHTML = envs.length ? envs.map(e => {
+        const target = Array.isArray(e.target) ? e.target.join(", ") : (e.target || "-");
+        const val = e.value != null ? String(e.value) : (e.hasValue ? "(set)" : "");
+        return `<tr><td><code>${escapeHtml(e.key || "")}</code></td><td>${escapeHtml(target)}</td><td>${escapeHtml(e.type || "-")}</td><td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(val)}">${escapeHtml(val || "—")}</td><td><button class="btn btn-sm btn-outline" data-vercel-env-del="${escapeHtml(e.id || "")}" type="button">Delete</button></td></tr>`;
+      }).join("") : `<tr><td colspan="5" style="color:var(--muted);text-align:center;">No Vercel environment variables</td></tr>`;
+      tbody.querySelectorAll("[data-vercel-env-del]").forEach(btn => btn.addEventListener("click", () => deleteVercelEnvVar(btn.getAttribute("data-vercel-env-del"))));
+    }
+    if (wrap) wrap.style.display = "block";
+    if (status) status.textContent = `Loaded ${envs.length} variable(s) from Vercel project ${data.project?.vercel_project_id || ""}.`;
+  } catch (err) {
+    if (status) status.textContent = `Error: ${err.message}`;
+    if (wrap) wrap.style.display = "none";
+    showToast("Failed to load Vercel env vars: " + err.message, "error");
+  }
+}
+
+async function addVercelEnvVar() {
+  const projectId = document.getElementById("integ-project-select")?.value;
+  if (!projectId) return showToast("Select a local project first", "error");
+  const key = document.getElementById("vercel-env-key")?.value?.trim();
+  const value = document.getElementById("vercel-env-value")?.value;
+  const target = (document.getElementById("vercel-env-target")?.value || "production,preview,development").split(",").map(s => s.trim()).filter(Boolean);
+  const type = document.getElementById("vercel-env-type")?.value || "encrypted";
+  if (!key || !value) return showToast("Key and value are required", "error");
+  try {
+    await api(`/projects/${projectId}/integrations/vercel/env`, { method: "POST", body: JSON.stringify({ key, value, target, type }) });
+    document.getElementById("vercel-env-key").value = "";
+    document.getElementById("vercel-env-value").value = "";
+    showToast("Vercel environment variable saved", "success");
+    await loadVercelEnvVars();
+  } catch (err) { showToast("Failed to save Vercel env var: " + err.message, "error"); }
+}
+
+async function deleteVercelEnvVar(envId) {
+  const projectId = document.getElementById("integ-project-select")?.value;
+  if (!projectId || !envId) return;
+  if (!confirm("Delete this Vercel environment variable?")) return;
+  try {
+    await api(`/projects/${projectId}/integrations/vercel/env/${encodeURIComponent(envId)}`, { method: "DELETE" });
+    showToast("Vercel environment variable deleted", "success");
+    await loadVercelEnvVars();
+  } catch (err) { showToast("Failed to delete Vercel env var: " + err.message, "error"); }
+}
+
+window.loadIntegrations = loadIntegrations;
+
+// Wire integration UI (script runs at end of body)
+(() => {
+  document.getElementById("airtable-save-btn")?.addEventListener("click", saveAirtableConfig);
+  document.getElementById("airtable-test-btn")?.addEventListener("click", testAirtable);
+  document.getElementById("airtable-sync-btn")?.addEventListener("click", syncAirtable);
+  document.getElementById("vercel-save-btn")?.addEventListener("click", saveVercelConfig);
+  document.getElementById("vercel-test-btn")?.addEventListener("click", testVercel);
+  document.getElementById("integ-save-mapping-btn")?.addEventListener("click", saveProjectVercelMapping);
+  document.getElementById("vercel-env-refresh-btn")?.addEventListener("click", loadVercelEnvVars);
+  document.getElementById("vercel-env-add-btn")?.addEventListener("click", addVercelEnvVar);
+  document.getElementById("integ-project-select")?.addEventListener("change", (e) => {
+    fillIntegProjectFields(e.target.value, integrationStatusCache?.projects || projects);
+    const st = document.getElementById("vercel-env-status"); if (st) st.textContent = "Project selected. Save mapping if needed, then load env vars.";
+    const w = document.getElementById("vercel-env-table-wrap"); if (w) w.style.display = "none";
+  });
+})();

@@ -37,8 +37,16 @@ const {
   listCommits,
   listAllCommits,
   deleteCommits,
+  getIntegrationConfig,
+  setIntegrationConfig,
+  getPublicIntegrationConfig,
+  setSyncState,
+  getSyncState,
+  upsertMapping,
+  getMapping,
+  listMappings,
+  slugify,
   now,
-  generateId,
 } = require("./database");
 
 const IS_VERCEL = !!process.env.VERCEL;
@@ -110,6 +118,9 @@ async function fetchCommitsFromGitHub(owner, repo, token, branch = "main", perPa
 
   return { commits, count: commits.length };
 }
+
+const airtable = require("./integrations/airtable");
+const vercel = require("./integrations/vercel");
 
 const app = express();
 app.use(express.json({ limit: "10mb" }));
@@ -1078,6 +1089,155 @@ app.post("/api/projects/import-git", (req, res) => {
     res.status(500).json({ error: "Failed to import repository", message: err.message });
   }
 });
+// ---------- Integration layer (Airtable DB + Vercel) ----------
+
+app.get("/api/integrations/status", (req, res) => {
+  try {
+    res.json({
+      airtable: getPublicIntegrationConfig("airtable"),
+      vercel: getPublicIntegrationConfig("vercel"),
+      projects: listProjects().map((p) => ({
+        id: p.id, name: p.name, slug: p.slug || slugify(p.name || p.id),
+        vercel_project_id: p.vercel_project_id || "", vercel_team_id: p.vercel_team_id || "",
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to get integration status", message: err.message });
+  }
+});
+
+app.get("/api/integrations/airtable/config", (req, res) => {
+  try { res.json(getPublicIntegrationConfig("airtable")); }
+  catch (err) { res.status(500).json({ error: "Failed to get Airtable config", message: err.message }); }
+});
+
+app.post("/api/integrations/airtable/config", (req, res) => {
+  try {
+    const body = req.body || {};
+    const current = getIntegrationConfig("airtable") || {};
+    const cfg = {
+      pat: body.pat && String(body.pat).trim() ? String(body.pat).trim() : (current.pat || ""),
+      baseId: (body.baseId != null ? String(body.baseId).trim() : "") || current.baseId || airtable.DEFAULTS.baseId,
+      projectsTable: (body.projectsTable != null ? String(body.projectsTable).trim() : "") || current.projectsTable || airtable.DEFAULTS.projectsTable,
+      deploymentsTable: (body.deploymentsTable != null ? String(body.deploymentsTable).trim() : "") || current.deploymentsTable || airtable.DEFAULTS.deploymentsTable,
+      commitsTable: (body.commitsTable != null ? String(body.commitsTable).trim() : "") || current.commitsTable || airtable.DEFAULTS.commitsTable,
+    };
+    if (body.clearPat) cfg.pat = "";
+    setIntegrationConfig("airtable", cfg);
+    res.json(getPublicIntegrationConfig("airtable"));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save Airtable config", message: err.message });
+  }
+});
+
+app.post("/api/integrations/airtable/test", async (req, res) => {
+  try {
+    const result = await airtable.testConnection(require("./database"), req.body || {});
+    setSyncState("airtable", { status: "test_ok", error: null, summary: JSON.stringify({ test: true, at: Date.now() }) });
+    res.json({ ok: true, result });
+  } catch (err) {
+    setSyncState("airtable", { status: "test_error", error: err.message, summary: null });
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/api/integrations/airtable/sync", async (req, res) => {
+  try {
+    const result = await airtable.syncAll(require("./database"), req.body || {});
+    res.json(result);
+  } catch (err) {
+    try { setSyncState("airtable", { status: "error", error: err.message, summary: null }); } catch {}
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.get("/api/integrations/vercel/config", (req, res) => {
+  try { res.json(getPublicIntegrationConfig("vercel")); }
+  catch (err) { res.status(500).json({ error: "Failed to get Vercel config", message: err.message }); }
+});
+
+app.post("/api/integrations/vercel/config", (req, res) => {
+  try {
+    const body = req.body || {};
+    const current = getIntegrationConfig("vercel") || {};
+    const cfg = {
+      token: body.token && String(body.token).trim() ? String(body.token).trim() : (current.token || ""),
+      teamId: body.teamId != null ? String(body.teamId).trim() : (current.teamId || ""),
+    };
+    if (body.clearToken) cfg.token = "";
+    setIntegrationConfig("vercel", cfg);
+    res.json(getPublicIntegrationConfig("vercel"));
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save Vercel config", message: err.message });
+  }
+});
+
+app.post("/api/integrations/vercel/test", async (req, res) => {
+  try {
+    const result = await vercel.testConnection(require("./database"), req.body || {});
+    setSyncState("vercel", { status: "test_ok", error: null, summary: JSON.stringify({ test: true, user: result.user || null }) });
+    res.json({ ok: true, result });
+  } catch (err) {
+    setSyncState("vercel", { status: "test_error", error: err.message, summary: null });
+    res.status(400).json({ ok: false, error: err.message });
+  }
+});
+
+app.put("/api/projects/:projectId/integrations/vercel", (req, res) => {
+  try {
+    const project = getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const body = req.body || {};
+    const updates = {};
+    if (body.vercel_project_id != null || body.vercelProjectId != null) updates.vercel_project_id = String(body.vercel_project_id ?? body.vercelProjectId).trim();
+    if (body.vercel_team_id != null || body.vercelTeamId != null) updates.vercel_team_id = String(body.vercel_team_id ?? body.vercelTeamId).trim();
+    if (body.slug != null) updates.slug = String(body.slug).trim() || slugify(project.name || project.id);
+    const updated = updateProject(project.id, updates);
+    res.json({ project: updated });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update project integration mapping", message: err.message });
+  }
+});
+
+app.get("/api/projects/:projectId/integrations/vercel/env", async (req, res) => {
+  try {
+    const project = getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const envs = await vercel.listEnvVars(require("./database"), project, req.query || {});
+    const safe = envs.map((e) => ({
+      id: e.id, key: e.key, type: e.type, target: e.target, configurationId: e.configurationId,
+      createdAt: e.createdAt, updatedAt: e.updatedAt,
+      hasValue: e.value != null && e.value !== "", value: e.value ?? null,
+      gitBranch: e.gitBranch || null,
+    }));
+    res.json({ envs: safe, project: { id: project.id, name: project.name, vercel_project_id: project.vercel_project_id || "", vercel_team_id: project.vercel_team_id || "" } });
+  } catch (err) {
+    res.status(400).json({ error: "Failed to list Vercel environment variables", message: err.message });
+  }
+});
+
+app.post("/api/projects/:projectId/integrations/vercel/env", async (req, res) => {
+  try {
+    const project = getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const result = await vercel.upsertEnvVar(require("./database"), project, req.body || {}, req.query || {});
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(400).json({ error: "Failed to save Vercel environment variable", message: err.message });
+  }
+});
+
+app.delete("/api/projects/:projectId/integrations/vercel/env/:envId", async (req, res) => {
+  try {
+    const project = getProjectById(req.params.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const result = await vercel.deleteEnvVar(require("./database"), project, req.params.envId, req.query || {});
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(400).json({ error: "Failed to delete Vercel environment variable", message: err.message });
+  }
+});
+
 app.use((req, res) => {
   if (req.path.startsWith("/api/")) {
     res.status(404).json({ error: "API endpoint not found" });

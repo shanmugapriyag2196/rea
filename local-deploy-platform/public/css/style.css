@@ -292,3 +292,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--border-hover); }
 .commit-open-deploy:hover { text-decoration:underline; }
 @media (max-width: 900px) { .dep-details-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .dep-kv-wide{grid-column:span 2;} .dep-kv:nth-child(4n){border-right:1px solid #111;} .dep-kv:nth-child(2n){border-right:none;} }
 
+
+/* Integration layer */
+.muted { color: var(--muted); font-size: 13px; }
+.integ-card { margin-bottom: 16px; }
+.integ-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.integ-head h3 { font-size: 16px; margin-bottom: 4px; }
+.integ-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.integ-grid label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--muted); }
+.integ-grid input, .integ-grid select { width: 100%; }
+.integ-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.integ-status { margin-top: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.integ-subhead { font-size: 13px; font-weight: 500; color: #fff; margin: 8px 0 10px; }
+.status-info { color: #888; border: 1px solid #333; background: #111; }
