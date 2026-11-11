@@ -112,11 +112,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
+      "projectUniqueName": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
       "projectName": "NativeAotFixture",
-      "projectPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
+      "projectPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\tests\\fixtures\\nativeaot\\NativeAotFixture.csproj",
       "packagesPath": "C:\\Users\\priyag\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\tests\\fixtures\\nativeaot\\obj\\",
+      "outputPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\tests\\fixtures\\nativeaot\\obj\\",
       "projectStyle": "PackageReference",
       "fallbackFolders": [
         "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
