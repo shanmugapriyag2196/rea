@@ -1,3 +1,3 @@
-﻿const express = require("express");
-const app = require("../server");
+const express = require('express');
+const app = require('../server');
 module.exports = (req, res) => app(req, res);
