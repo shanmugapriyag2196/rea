@@ -37,6 +37,9 @@ const {
   listCommits,
   listAllCommits,
   deleteCommits,
+  getAirtableConfig,
+  getPublicAirtableConfig,
+  setAirtableConfig,
   now,
   generateId,
 } = require("./database");
@@ -145,6 +148,45 @@ function isSafeZipEntry(entryName) {
     if (part === "..") return false;
   }
   return true;
+}
+
+// ---------- Airtable integration (read-only dashboard data) ----------
+async function airtableFetchAllRecords(cfg, tableId) {
+  if (!cfg.pat) throw new Error("Airtable Personal Access Token is not configured. Add it in Settings.");
+  if (!cfg.baseId || !tableId) throw new Error("Airtable Base ID / Table ID not configured.");
+  const records = [];
+  let offset = null;
+  for (let page = 0; page < 50; page++) {
+    const url = new URL(`https://api.airtable.com/v0/${cfg.baseId}/${tableId}`);
+    url.searchParams.set("pageSize", "100");
+    if (offset) url.searchParams.set("offset", offset);
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${cfg.pat}` } });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data?.error?.message || data?.error?.type || `Airtable API error ${res.status}`;
+      throw new Error(msg);
+    }
+    for (const r of data.records || []) records.push(r);
+    if (!data.offset) break;
+    offset = data.offset;
+  }
+  return records;
+}
+
+function af(fields, ...names) {
+  for (const n of names) {
+    if (fields[n] !== undefined && fields[n] !== null && fields[n] !== "") return fields[n];
+  }
+  return "";
+}
+
+function normalizeAirtableStatus(v) {
+  const s = String(v || "").trim().toLowerCase();
+  if (s === "ready") return "ready";
+  if (s === "building") return "building";
+  if (s === "failed" || s === "error") return "error";
+  if (s === "success") return "ready";
+  return s || "unknown";
 }
 
 function parseZipBuffer(buffer) {
@@ -1078,6 +1120,89 @@ app.post("/api/projects/import-git", (req, res) => {
     res.status(500).json({ error: "Failed to import repository", message: err.message });
   }
 });
+// ---------- Airtable dashboard APIs (read-only) ----------
+app.get("/api/integrations/airtable/config", (req, res) => {
+  try {
+    res.json(getPublicAirtableConfig());
+  } catch (err) {
+    res.status(500).json({ error: "Failed to get Airtable config", message: err.message });
+  }
+});
+
+app.post("/api/integrations/airtable/config", (req, res) => {
+  try {
+    const body = req.body || {};
+    const saved = setAirtableConfig(body);
+    res.json({ ok: true, config: saved });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to save Airtable config", message: err.message });
+  }
+});
+
+app.get("/api/airtable/dashboard/overview", async (req, res) => {
+  try {
+    const cfg = getAirtableConfig();
+    const records = await airtableFetchAllRecords(cfg, cfg.deploymentsTableId);
+    const rows = records.map((r) => ({ id: r.id, fields: r.fields || {} }));
+    const deploymentIds = rows.map((r) => af(r.fields, "DeploymentId", "Deployment ID", "Id", "ID")).filter((v) => String(v).trim() !== "");
+    const projectNames = rows.map((r) => af(r.fields, "ProjectName", "Project Name", "Project")).filter((v) => String(v).trim() !== "");
+    const statuses = rows.map((r) => normalizeAirtableStatus(af(r.fields, "Status", "status")));
+    const totalDeployments = deploymentIds.length || rows.length;
+    const totalProjects = new Set(projectNames.map((v) => String(v).trim())).size;
+    const ready = statuses.filter((s) => s === "ready").length;
+    const failed = statuses.filter((s) => s === "error" || s === "failed").length;
+    res.json({
+      ok: true,
+      source: "airtable",
+      metrics: { totalDeployments, totalProjects, ready, failed },
+      count: rows.length,
+    });
+  } catch (err) {
+    res.status(err.message && err.message.includes("not configured") ? 400 : 500).json({ ok: false, error: err.message, source: "airtable" });
+  }
+});
+
+app.get("/api/airtable/projects", async (req, res) => {
+  try {
+    const cfg = getAirtableConfig();
+    const records = await airtableFetchAllRecords(cfg, cfg.projectsTableId);
+    const projects = records.map((r) => {
+      const f = r.fields || {};
+      return {
+        id: r.id,
+        name: af(f, "Name", "ProjectName", "Project Name"),
+        repositoryUrl: af(f, "URL", "Repository URL", "RepositoryUrl", "Repo URL", "RepoURL"),
+        createdAt: af(f, "CreatedAt", "Created At", "Created"),
+        framework: af(f, "Framework", "framework"),
+      };
+    });
+    res.json({ ok: true, source: "airtable", projects, count: projects.length });
+  } catch (err) {
+    res.status(err.message && err.message.includes("not configured") ? 400 : 500).json({ ok: false, error: err.message, source: "airtable", projects: [] });
+  }
+});
+
+app.get("/api/airtable/commits", async (req, res) => {
+  try {
+    const cfg = getAirtableConfig();
+    const records = await airtableFetchAllRecords(cfg, cfg.commitsTableId);
+    const commits = records.map((r) => {
+      const f = r.fields || {};
+      return {
+        id: r.id,
+        commitHash: af(f, "CommitHash", "Commit Hash", "Commit", "SHA"),
+        message: af(f, "CommitMessage", "Commit Message", "Message"),
+        author: af(f, "Author", "author"),
+        projectName: af(f, "ProjectName", "Project Name", "Project"),
+        timestamp: af(f, "Timestamp", "Date", "CreatedAt", "Created At"),
+      };
+    });
+    res.json({ ok: true, source: "airtable", commits, count: commits.length });
+  } catch (err) {
+    res.status(err.message && err.message.includes("not configured") ? 400 : 500).json({ ok: false, error: err.message, source: "airtable", commits: [] });
+  }
+});
+
 app.use((req, res) => {
   if (req.path.startsWith("/api/")) {
     res.status(404).json({ error: "API endpoint not found" });

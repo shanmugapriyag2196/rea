@@ -36,14 +36,14 @@
 
     <main class="main">
       <section id="section-overview" class="section active">
-        <div class="section-header"><h1 class="section-title">Overview</h1></div>
+        <div class="section-header"><h1 class="section-title">Overview</h1><p class="section-subtitle" id="overview-source-note">Metrics from Airtable (Deployments table)</p></div>
         <div class="metrics-grid">
           <div class="metric-card"><div class="metric-label">Total Projects</div><div class="metric-value" id="stat-projects">0</div></div>
           <div class="metric-card"><div class="metric-label">Total Deployments</div><div class="metric-value" id="stat-deployments">0</div></div>
           <div class="metric-card"><div class="metric-label">Ready</div><div class="metric-row"><span class="status-dot ready"></span><div class="metric-value" id="stat-ready">0</div></div></div>
           <div class="metric-card"><div class="metric-label">Failed</div><div class="metric-row"><span class="status-dot failed"></span><div class="metric-value" id="stat-failed">0</div></div></div>
         </div>
-        <div id="overview-empty" class="empty-state" style="display:none;"><h2>No projects yet</h2><p>Import a repository to get started.</p></div>
+        <div id="overview-empty" class="empty-state" style="display:none;"><h2>Airtable not connected</h2><p>Configure Airtable in Settings to load dashboard metrics.</p></div>
         <div id="recent-deployments" style="display:none;">
           <h2 style="margin-bottom:16px;font-size:18px;">Recent Deployments</h2>
           <div class="table-wrap">
@@ -56,9 +56,9 @@
       </section>
 
       <section id="section-projects" class="section">
-        <div class="section-header"><h1 class="section-title">Projects</h1></div>
+        <div class="section-header"><h1 class="section-title">Projects</h1><p class="section-subtitle">From Airtable Projects table</p></div>
         <div class="filters-bar">
-          <input type="text" class="search-input" placeholder="Search projects...">
+          <input type="text" class="search-input" placeholder="Search projects..." id="projects-search" />
           <button class="btn btn-primary" id="show-import-git-modal" type="button">Import Git Repository</button>
         </div>
         <div class="modal-overlay" id="github-import-modal">
@@ -78,20 +78,20 @@
           </div>
         </div>
         <div id="projects-list" class="table-wrap">
-          <table class="data-table"><thead><tr><th>Name</th><th>Framework</th><th>Created</th><th>Actions</th></tr></thead><tbody id="projects-table-body"></tbody></table>
+          <table class="data-table"><thead><tr><th>Name</th><th>Repository URL</th><th>Framework</th><th>Created At</th></tr></thead><tbody id="projects-table-body"></tbody></table>
         </div>
-        <div id="projects-empty" class="empty-state" style="display:none;"><h2>No projects</h2><p>Import a Git repository to get started.</p></div>
+        <div id="projects-empty" class="empty-state" style="display:none;"><h2>No projects</h2><p>Configure Airtable in Settings or add records in your Projects table.</p></div>
       </section>
 
       <section id="section-commits" class="section">
         <div class="section-header">
           <h1 class="section-title">Commits</h1>
-          <p class="section-subtitle">Commits from imported Git repositories</p>
+          <p class="section-subtitle">From Airtable Commits table</p>
         </div>
         <div id="commits-page-wrap" class="table-wrap">
           <table class="data-table commits-table">
-            <thead><tr><th>Project</th><th>Commit</th><th>Message</th><th>Author</th><th>Date</th></tr></thead>
-            <tbody id="commits-page-body"><tr><td colspan="5" style="color:var(--muted);padding:20px;">No commits yet. Import a Git repository.</td></tr></tbody>
+            <thead><tr><th>Project</th><th>Commit</th><th>Message</th><th>Author</th><th>Timestamp</th></tr></thead>
+            <tbody id="commits-page-body"><tr><td colspan="5" style="color:var(--muted);padding:20px;">Configure Airtable in Settings to load commits.</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -150,7 +150,24 @@
       <section id="section-integrations" class="section"><div class="section-header"><h1 class="section-title">Integrations</h1></div><div class="card"><h3>GitHub</h3><p style="color:var(--muted);">Connect GitHub in local mode to import repositories and view commits.</p></div></section>
       <section id="section-domains" class="section"><div class="section-header"><h1 class="section-title">Domains</h1></div><div class="domains-note domains-note-top" id="domains-note">Domains are stored locally for this workspace.</div><div id="domains-list-wrap" class="table-wrap"><table class="data-table domains-table"><thead><tr><th>Project</th><th>Domain</th><th>Environment</th><th>Status</th><th>SSL</th><th>Actions</th></tr></thead><tbody id="domains-table-body"><tr><td colspan="6" style="color:var(--muted);padding:20px;text-align:center;">No domains</td></tr></tbody></table></div></section>
       <section id="section-observability" class="section"><div class="section-header"><h1 class="section-title">Observability</h1></div><div class="card" style="color:var(--muted);">Runtime logs and analytics require the local Node backend.</div></section>
-      <section id="section-settings" class="section"><div class="section-header"><h1 class="section-title">Settings</h1></div><div class="card"><h3>General</h3><p style="color:var(--muted);">VG Deployment dashboard. Full API features (import, deploy, git sync, persistent data) run in local mode: <code>npm run dev</code> in <code>local-deploy-platform</code> → http://127.0.0.1:3456/</p></div></section>
+      <section id="section-settings" class="section">
+        <div class="section-header"><h1 class="section-title">Settings</h1></div>
+        <div class="card" style="margin-bottom:16px;">
+          <h3 style="margin-bottom:8px;">Airtable Database</h3>
+          <p style="color:var(--muted);margin-bottom:16px;">Connect your Airtable base to power dashboard metrics, Projects, and Commits. Token is stored locally on this machine (server-side).</p>
+          <div class="form-group"><label>Personal Access Token (PAT)</label><input type="password" id="airtable-pat" placeholder="pat..." autocomplete="off"></div>
+          <div class="form-group"><label>Base ID</label><input type="text" id="airtable-base-id" placeholder="app..."></div>
+          <div class="form-group"><label>Deployments Table ID</label><input type="text" id="airtable-deployments-table-id" placeholder="tbl..."></div>
+          <div class="form-group"><label>Projects Table ID</label><input type="text" id="airtable-projects-table-id" placeholder="tbl..."></div>
+          <div class="form-group"><label>Commits Table ID</label><input type="text" id="airtable-commits-table-id" placeholder="tbl..."></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+            <button class="btn btn-primary" id="save-airtable-settings" type="button">Save Airtable Settings</button>
+            <button class="btn btn-outline" id="test-airtable-settings" type="button">Reload Dashboard Data</button>
+          </div>
+          <p id="airtable-settings-status" style="color:var(--muted);margin-top:12px;font-size:13px;"></p>
+        </div>
+        <div class="card"><h3>General</h3><p style="color:var(--muted);">VG Deployment dashboard. Full local API features (import, deploy, git sync, Airtable-backed views) run in local mode: <code>npm run dev</code> in <code>local-deploy-platform</code> → http://127.0.0.1:3456/</p></div>
+      </section>
 
       <div id="project-detail" style="display:none;">
         <button class="btn btn-outline" id="back-to-projects" type="button" style="margin-bottom:16px;">← Back</button>

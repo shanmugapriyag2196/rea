@@ -72,83 +72,78 @@ function navigateTo(sectionId) {
   if (sectionId === "deployments") loadDeployments();
   if (sectionId === "domains") loadDomains();
   if (sectionId === "env") loadEnvProjects();
+  if (sectionId === "settings") loadAirtableSettings();
 }
 
 async function loadOverview() {
+  const empty = document.getElementById("overview-empty");
+  const recent = document.getElementById("recent-deployments");
+  const note = document.getElementById("overview-source-note");
   try {
-    const p = await api("/projects");
-    projects = Array.isArray(p) ? p : (p && Array.isArray(p.projects) ? p.projects : []);
-    let allDeployments = [];
-    for (const proj of projects) {
-      try {
-        const data = await api(`/projects/${proj.id}/deployments`);
-        const deps = Array.isArray(data) ? data : data.deployments || [];
-        deps.forEach((d) => (d.projectName = proj.name));
-        allDeployments.push(...deps);
-      } catch {}
-    }
-    deployments = allDeployments.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-
-    document.getElementById("stat-projects").textContent = projects.length;
-    document.getElementById("stat-deployments").textContent = deployments.length;
-    document.getElementById("stat-ready").textContent = deployments.filter((d) => d.status === "ready").length;
-    document.getElementById("stat-failed").textContent = deployments.filter((d) => d.status === "error").length;
-
-    const empty = document.getElementById("overview-empty");
-    const recent = document.getElementById("recent-deployments");
-    const tbody = document.getElementById("recent-deployments-body");
-
-    if (projects.length === 0) {
-      if (empty) empty.style.display = "flex";
-      if (recent) recent.style.display = "none";
-    } else {
-      if (empty) empty.style.display = "none";
-      if (recent) recent.style.display = "block";
-      if (tbody) {
-        tbody.innerHTML = deployments.slice(0, 5).map((d) => `
-          <tr>
-            <td>${escapeHtml(d.projectName || "-")}</td>
-            <td><code>${(d.commit_sha || d.version || "-").toString().slice(0, 7)}</code></td>
-            <td>${statusBadge(d.status)}</td>
-            <td>${formatDuration(d.build_duration_ms)}</td>
-            <td>${formatDate(d.created_at)}</td>
-            <td><button class="btn btn-sm btn-outline" onclick="viewDeployment('${d.id}')">View</button></td>
-          </tr>`).join("");
-      }
-    }
+    const data = await api("/airtable/dashboard/overview");
+    const m = data.metrics || {};
+    document.getElementById("stat-projects").textContent = m.totalProjects ?? 0;
+    document.getElementById("stat-deployments").textContent = m.totalDeployments ?? 0;
+    document.getElementById("stat-ready").textContent = m.ready ?? 0;
+    document.getElementById("stat-failed").textContent = m.failed ?? 0;
+    if (note) note.textContent = "Metrics from Airtable Deployments table (count of DeploymentId, unique ProjectName, Status Ready/Failed)";
+    if (empty) empty.style.display = "none";
+    if (recent) recent.style.display = "none";
   } catch (err) {
-    showToast("Failed to load overview: " + err.message, "error");
+    document.getElementById("stat-projects").textContent = "0";
+    document.getElementById("stat-deployments").textContent = "0";
+    document.getElementById("stat-ready").textContent = "0";
+    document.getElementById("stat-failed").textContent = "0";
+    if (note) note.textContent = "Airtable not connected";
+    if (empty) {
+      empty.style.display = "flex";
+      empty.innerHTML = `<h2>Airtable not connected</h2><p>${escapeHtml(err.message || "Configure Airtable in Settings.")}</p>`;
+    }
+    if (recent) recent.style.display = "none";
   }
 }
 
 async function loadProjects() {
+  const tbody = document.getElementById("projects-table-body");
+  const empty = document.getElementById("projects-empty");
+  const list = document.getElementById("projects-list");
   try {
-    const p = await api("/projects");
-    projects = Array.isArray(p) ? p : (p && Array.isArray(p.projects) ? p.projects : []);
-    const tbody = document.getElementById("projects-table-body");
-    const empty = document.getElementById("projects-empty");
-    const list = document.getElementById("projects-list");
-    if (projects.length === 0) {
+    const data = await api("/airtable/projects");
+    const items = Array.isArray(data.projects) ? data.projects : [];
+    projects = items.map((p) => ({ ...p, id: p.id || p.name })); // minimal local shape
+    if (!items.length) {
       if (list) list.style.display = "none";
-      if (empty) empty.style.display = "flex";
-    } else {
-      if (list) list.style.display = "block";
-      if (empty) empty.style.display = "none";
-      if (tbody) {
-        tbody.innerHTML = projects.map((p) => `
-          <tr>
-            <td>${escapeHtml(p.name)}</td>
-            <td>${escapeHtml(p.framework || "static")}</td>
-            <td>${formatDate(p.created_at)}</td>
-            <td>
-              <button class="btn btn-sm btn-outline" onclick="viewProject('${p.id}')">View</button>
-              <button class="btn btn-sm btn-outline" onclick="deleteProject('${p.id}')">Delete</button>
-            </td>
-          </tr>`).join("");
+      if (empty) {
+        empty.style.display = "flex";
+        empty.innerHTML = `<h2>No projects</h2><p>No records found in Airtable Projects table.</p>`;
       }
+      if (tbody) tbody.innerHTML = "";
+      return;
+    }
+    if (list) list.style.display = "block";
+    if (empty) empty.style.display = "none";
+    if (tbody) {
+      tbody.innerHTML = items.map((p) => {
+        const url = p.repositoryUrl ? String(p.repositoryUrl) : "";
+        const safeUrl = /^https?:\/\//i.test(url) ? url : "";
+        const name = escapeHtml(p.name || "-");
+        const urlCell = safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener" class="commit-link">${escapeHtml(safeUrl)}</a>` : (url ? escapeHtml(url) : "-");
+        const created = p.createdAt ? escapeHtml(String(p.createdAt)) : "-";
+        return `<tr>
+          <td>${name}</td>
+          <td class="commit-message">${urlCell}</td>
+          <td>${escapeHtml(p.framework || "-")}</td>
+          <td>${created}</td>
+        </tr>`;
+      }).join("");
     }
   } catch (err) {
-    showToast("Failed to load projects: " + err.message, "error");
+    if (list) list.style.display = "none";
+    if (empty) {
+      empty.style.display = "flex";
+      empty.innerHTML = `<h2>Airtable not connected</h2><p>${escapeHtml(err.message || "Configure Airtable in Settings.")}</p>`;
+    }
+    showToast("Failed to load projects from Airtable: " + err.message, "error");
   }
 }
 
@@ -357,35 +352,34 @@ async function loadProjectDetailCommits(projectId) {
     window.scrollTo(0, 0);
     document.querySelector(".main")?.scrollTo?.(0, 0);
     try {
-      const data = await api("/commits");
-      const commits = Array.isArray(data) ? data : data.commits || [];
+      const data = await api("/airtable/commits");
+      const commits = Array.isArray(data.commits) ? data.commits : [];
       const subtitle = document.querySelector("#section-commits .section-subtitle");
-      if (subtitle) subtitle.textContent = commits.length ? `${commits.length} commits from imported Git repositories` : "Recent commits from imported Git repositories";
+      if (subtitle) subtitle.textContent = commits.length ? `${commits.length} commits from Airtable` : "From Airtable Commits table";
       if (commits.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">No commits yet</div><div class="commits-empty-text">Import a Git repository to fetch and display all commits, like Vercel.</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">No commits</div><div class="commits-empty-text">No records found in Airtable Commits table.</div></div></td></tr>`;
         window.scrollTo(0, 0);
         return;
       }
       tbody.innerHTML = commits.map((c) => {
-        const sha = (c.sha || "").toString();
-        const short = sha.slice(0, 7);
+        const sha = (c.commitHash || "").toString();
+        const short = sha ? sha.slice(0, 7) : "—";
         const msg = escapeHtml((c.message || "").split("\n")[0] || "—");
-        const author = escapeHtml(c.author_name || c.authorName || "—");
-        const project = escapeHtml(c.project_name || c.projectName || "—");
-        const projectId = c.project_id || c.projectId || "";
-        const date = formatDate(c.author_date || c.authorDate || c.created_at);
+        const author = escapeHtml(c.author || "—");
+        const project = escapeHtml(c.projectName || "—");
+        const ts = c.timestamp ? escapeHtml(String(c.timestamp)) : "-";
         return `
-        <tr class="commit-row" data-project-id="${escapeHtml(projectId)}" data-sha="${escapeHtml(sha)}">
+        <tr class="commit-row">
           <td class="commit-project">${project}</td>
-          <td class="commit-sha"><button type="button" class="commit-pill commit-link" onclick="openCommitDeployment('${escapeHtml(projectId)}','${escapeHtml(sha)}')" title="Open deployment page">${short || "—"}</button></td>
-          <td class="commit-message commit-open-deploy" title="${msg}" onclick="openCommitDeployment('${escapeHtml(projectId)}','${escapeHtml(sha)}')">${msg}</td>
+          <td class="commit-sha"><span class="commit-pill" title="${escapeHtml(sha)}">${short}</span></td>
+          <td class="commit-message" title="${msg}">${msg}</td>
           <td class="commit-author">${author}</td>
-          <td class="commit-date">${date}</td>
+          <td class="commit-date">${ts}</td>
         </tr>`;
       }).join("");
       requestAnimationFrame(() => { window.scrollTo(0, 0); document.querySelector(".main")?.scrollTo?.(0, 0); });
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">Could not load commits</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">Airtable not connected</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
       window.scrollTo(0, 0);
     }
   }
@@ -673,6 +667,52 @@ document.addEventListener("DOMContentLoaded", () => {
     }).then(() => { showToast("Variable added", "success"); loadEnvVars(); }).catch((e) => showToast(e.message, "error"));
   });
 
+  document.getElementById("save-airtable-settings")?.addEventListener("click", saveAirtableSettings);
+  document.getElementById("test-airtable-settings")?.addEventListener("click", () => { loadOverview(); loadProjects(); loadAllCommitsPage(); showToast("Reloading Airtable data...", "info"); });
+
   loadOverview();
 });
 
+
+async function loadAirtableSettings() {
+  const status = document.getElementById("airtable-settings-status");
+  try {
+    const c = await api("/integrations/airtable/config");
+    const set = (id, v) => { const el = document.getElementById(id); if (el && el.type !== "password") el.value = v || ""; };
+    set("airtable-base-id", c.baseId || "appKbcUHLOb0igCmB");
+    set("airtable-deployments-table-id", c.deploymentsTableId || "tblxLdckVeOeRfrVB");
+    set("airtable-projects-table-id", c.projectsTableId || "");
+    set("airtable-commits-table-id", c.commitsTableId || "");
+    const pat = document.getElementById("airtable-pat");
+    if (pat) pat.value = "";
+    if (status) status.textContent = c.hasPat ? `Token configured (${c.patMasked}). Leave PAT blank to keep current token.` : "No Airtable token saved yet. Enter PAT and table IDs, then Save.";
+  } catch (err) {
+    if (status) status.textContent = "Failed to load Airtable settings: " + err.message;
+  }
+}
+
+async function saveAirtableSettings() {
+  const status = document.getElementById("airtable-settings-status");
+  const btn = document.getElementById("save-airtable-settings");
+  if (btn) btn.disabled = true;
+  try {
+    const body = {
+      pat: (document.getElementById("airtable-pat")?.value || "").trim(),
+      baseId: (document.getElementById("airtable-base-id")?.value || "").trim(),
+      deploymentsTableId: (document.getElementById("airtable-deployments-table-id")?.value || "").trim(),
+      projectsTableId: (document.getElementById("airtable-projects-table-id")?.value || "").trim(),
+      commitsTableId: (document.getElementById("airtable-commits-table-id")?.value || "").trim(),
+    };
+    const res = await api("/integrations/airtable/config", { method: "POST", body: JSON.stringify(body) });
+    const pat = document.getElementById("airtable-pat"); if (pat) pat.value = "";
+    const c = res.config || {};
+    if (status) status.textContent = c.hasPat ? `Saved. Token: ${c.patMasked}. Reloading dashboard data...` : "Saved (no token configured).";
+    showToast("Airtable settings saved", "success");
+    await Promise.allSettled([loadOverview(), loadProjects(), loadAllCommitsPage()]);
+  } catch (err) {
+    if (status) status.textContent = "Save failed: " + err.message;
+    showToast("Failed to save Airtable settings: " + err.message, "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}

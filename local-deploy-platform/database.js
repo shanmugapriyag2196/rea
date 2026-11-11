@@ -64,6 +64,12 @@ function initSchema() {
       updated_at INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT,
+      updated_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS deployments (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -471,6 +477,56 @@ function deleteCommits(projectId) {
   saveDb();
 }
 
+// ---- App settings (Airtable integration, stored locally) ----
+function getSetting(key) {
+  const row = get("SELECT value FROM app_settings WHERE key = ?", [key]);
+  return row ? row.value : null;
+}
+
+function setSetting(key, value) {
+  const ts = now();
+  run(
+    "INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+    [key, value == null ? "" : String(value), ts]
+  );
+  saveDb();
+}
+
+function getAirtableConfig() {
+  return {
+    pat: getSetting("airtable.pat") || "",
+    baseId: getSetting("airtable.baseId") || "appKbcUHLOb0igCmB",
+    deploymentsTableId: getSetting("airtable.deploymentsTableId") || "tblxLdckVeOeRfrVB",
+    projectsTableId: getSetting("airtable.projectsTableId") || "tbl2z6ShZzPC6dICR",
+    commitsTableId: getSetting("airtable.commitsTableId") || "tblpKj792XwLlytVi",
+  };
+}
+
+function getPublicAirtableConfig() {
+  const c = getAirtableConfig();
+  const pat = c.pat || "";
+  return {
+    baseId: c.baseId,
+    deploymentsTableId: c.deploymentsTableId,
+    projectsTableId: c.projectsTableId,
+    commitsTableId: c.commitsTableId,
+    hasPat: !!pat,
+    patMasked: pat ? (pat.length <= 8 ? "********" : pat.slice(0, 4) + "..." + pat.slice(-4)) : "",
+  };
+}
+
+function setAirtableConfig(input = {}) {
+  if (Object.prototype.hasOwnProperty.call(input, "pat")) {
+    const pat = String(input.pat || "").trim();
+    if (pat) setSetting("airtable.pat", pat); // blank = keep existing
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "baseId")) setSetting("airtable.baseId", String(input.baseId || "").trim());
+  if (Object.prototype.hasOwnProperty.call(input, "deploymentsTableId")) setSetting("airtable.deploymentsTableId", String(input.deploymentsTableId || "").trim());
+  if (Object.prototype.hasOwnProperty.call(input, "projectsTableId")) setSetting("airtable.projectsTableId", String(input.projectsTableId || "").trim());
+  if (Object.prototype.hasOwnProperty.call(input, "commitsTableId")) setSetting("airtable.commitsTableId", String(input.commitsTableId || "").trim());
+  return getPublicAirtableConfig();
+}
+
 // Close on process exit
 process.on("exit", () => {
   if (db) {
@@ -511,6 +567,11 @@ module.exports = {
   listAllCommits,
   deleteCommits,
   getDeploymentByCommit,
+  getSetting,
+  setSetting,
+  getAirtableConfig,
+  getPublicAirtableConfig,
+  setAirtableConfig,
   now,
   generateId,
 };
