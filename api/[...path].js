@@ -1,2 +1,3 @@
 const express = require('express');
-module.exports = require('../local-deploy-platform/server');
+const app = require('../local-deploy-platform/server');
+module.exports = app;
