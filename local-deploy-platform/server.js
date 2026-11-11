@@ -116,6 +116,10 @@ app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// Ensure tmp upload dir exists
+const tmpUploadDir = IS_VERCEL ? path.join(TMP_BASE, "vg-tmp-uploads") : path.join(__dirname, "logs", "tmp-uploads");
+ensureWritableDir(tmpUploadDir);
+
 // Multer config for ZIP uploads
 const upload = multer({
   dest: tmpUploadDir,
@@ -129,10 +133,6 @@ const upload = multer({
     }
   },
 });
-
-// Ensure tmp upload dir exists
-const tmpUploadDir = IS_VERCEL ? path.join(TMP_BASE, "vg-tmp-uploads") : path.join(__dirname, "logs", "tmp-uploads");
-ensureWritableDir(tmpUploadDir);
 // ---------- Helpers ----------
 
 function isSafeZipEntry(entryName) {

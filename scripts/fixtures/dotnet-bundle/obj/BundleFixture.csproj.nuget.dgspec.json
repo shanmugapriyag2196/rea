@@ -1,23 +1,23 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj": {}
+    "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj": {}
   },
   "projects": {
-    "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj": {
+    "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj",
+        "projectUniqueName": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj",
         "projectName": "BundleFixture",
-        "projectPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj",
+        "projectPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\scripts\\fixtures\\dotnet-bundle\\BundleFixture.csproj",
         "packagesPath": "C:\\Users\\priyag\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\scripts\\fixtures\\dotnet-bundle\\obj\\",
+        "outputPath": "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\scripts\\fixtures\\dotnet-bundle\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
         ],
         "configFilePaths": [
-          "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\local-deploy-platform\\workspaces\\97c9e64d5934a706512719fb2f624753\\repo\\scripts\\fixtures\\dotnet-bundle\\NuGet.Config",
+          "C:\\Users\\priyag\\Documents\\VG Deploy-REA\\scripts\\fixtures\\dotnet-bundle\\NuGet.Config",
           "C:\\Users\\priyag\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
