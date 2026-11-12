@@ -1,4 +1,4 @@
-﻿{
+{
   "installCommand": "npm --prefix local-deploy-platform install",
   "framework": null,
   "rewrites": [

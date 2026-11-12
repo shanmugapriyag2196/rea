@@ -1,4 +1,4 @@
-﻿{
+{
   "installCommand": "npm install",
   "framework": null,
   "rewrites": [
