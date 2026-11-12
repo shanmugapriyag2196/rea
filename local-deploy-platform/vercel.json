@@ -1,13 +1,6 @@
 ﻿{
-  "version": 2,
-  "buildCommand": "echo \"vg-deploy api\"",
   "installCommand": "npm install",
   "framework": null,
-  "functions": {
-    "api/**/*.js": {
-      "includeFiles": "{server.js,database.js,worker.js,public/**,node_modules/**}"
-    }
-  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.js" }
   ]

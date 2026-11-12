@@ -1,13 +1,6 @@
 ﻿{
-  "version": 2,
-  "buildCommand": "echo \"vg-deploy api\"",
   "installCommand": "npm --prefix local-deploy-platform install",
   "framework": null,
-  "functions": {
-    "api/**/*.js": {
-      "includeFiles": "local-deploy-platform/**"
-    }
-  },
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index.js" }
   ]
