@@ -150,9 +150,9 @@ function isSafeZipEntry(entryName) {
   return true;
 }
 
-// ---------- Airtable integration (read-only dashboard data) ----------
+// ---------- Airtable integration (dashboard data) ----------
 async function airtableFetchAllRecords(cfg, tableId) {
-  if (!cfg.pat) throw new Error("Airtable Personal Access Token is not configured. Add it in Settings.");
+  if (!cfg.pat) throw new Error("Airtable Personal Access Token is not configured. Add it in Settings or Vercel env (AIRTABLE_PAT).");
   if (!cfg.baseId || !tableId) throw new Error("Airtable Base ID / Table ID not configured.");
   const records = [];
   let offset = null;
@@ -171,6 +171,74 @@ async function airtableFetchAllRecords(cfg, tableId) {
     offset = data.offset;
   }
   return records;
+}
+
+async function airtableCreateRecords(cfg, tableId, records) {
+  if (!cfg.pat) throw new Error("Airtable PAT not configured");
+  if (!cfg.baseId || !tableId) throw new Error("Airtable Base/Table ID not configured");
+  const created = [];
+  for (let i = 0; i < records.length; i += 10) {
+    const batch = records.slice(i, i + 10).map((fields) => ({ fields }));
+    const url = `https://api.airtable.com/v0/${cfg.baseId}/${tableId}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.pat}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ records: batch, typecast: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data?.error?.message || data?.error?.type || `Airtable create error ${res.status}`;
+      throw new Error(msg);
+    }
+    for (const r of data.records || []) created.push(r);
+  }
+  return created;
+}
+
+function toAirtableDate(ts) {
+  if (!ts) return undefined;
+  try {
+    if (typeof ts === "number") return new Date(ts).toISOString();
+    const d = new Date(ts);
+    if (!isNaN(d.getTime())) return d.toISOString();
+  } catch {}
+  return undefined;
+}
+
+async function syncProjectToAirtable(project, repoUrl) {
+  const cfg = getAirtableConfig();
+  if (!cfg.pat || !cfg.projectsTableId) return { skipped: true, reason: "Airtable PAT or Projects table ID not configured" };
+  const fields = {
+    Name: project.name || "",
+    URL: repoUrl || project.github_repo_url || "",
+    Framework: project.framework || "static",
+  };
+  const createdAt = toAirtableDate(project.created_at);
+  if (createdAt) fields.CreatedAt = createdAt;
+  const recs = await airtableCreateRecords(cfg, cfg.projectsTableId, [fields]);
+  return { ok: true, count: recs.length };
+}
+
+async function syncCommitsToAirtable(commits, projectName) {
+  const cfg = getAirtableConfig();
+  if (!cfg.pat || !cfg.commitsTableId) return { skipped: true, reason: "Airtable PAT or Commits table ID not configured" };
+  const records = (commits || []).filter(c => c && c.sha).map((c) => {
+    const fields = {
+      CommitHash: c.sha,
+      CommitMessage: c.message || "",
+      Author: c.authorName || c.author_name || "",
+      ProjectName: projectName || c.projectName || "",
+    };
+    const ts = toAirtableDate(c.authorDate || c.author_date);
+    if (ts) fields.Timestamp = ts;
+    return fields;
+  });
+  if (!records.length) return { ok: true, count: 0 };
+  const recs = await airtableCreateRecords(cfg, cfg.commitsTableId, records);
+  return { ok: true, count: recs.length };
 }
 
 function af(fields, ...names) {
@@ -1078,6 +1146,9 @@ app.post("/api/projects/import-git", async (req, res) => {
         try {
           const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
           setProjectGitHub(project.id, repoUrl, "", "main");
+          let airtableSync = { project: null, commits: null };
+          try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
+          try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
           return res.status(201).json({
             project: getProjectById(project.id) || project,
             message: "Repository imported via GitHub API (git unavailable).",
@@ -1086,6 +1157,7 @@ app.post("/api/projects/import-git", async (req, res) => {
             count: result.count,
             commitCount: result.commitCount,
             warning: "Git clone unavailable in this runtime. Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo.",
+            airtable: airtableSync,
           });
         } catch (apiErr) {
           try { deleteProject(project.id); } catch {}
@@ -1106,6 +1178,9 @@ app.post("/api/projects/import-git", async (req, res) => {
           try {
             const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
             setProjectGitHub(project.id, repoUrl, "", "main");
+            let airtableSync = { project: null, commits: null };
+            try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
+            try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
             return res.status(201).json({
               project: getProjectById(project.id) || project,
               message: "Repository imported via GitHub API (git clone unavailable/failed).",
@@ -1114,6 +1189,7 @@ app.post("/api/projects/import-git", async (req, res) => {
               count: result.count,
               commitCount: result.commitCount,
               warning: "Git clone failed in this runtime; commits loaded via GitHub API. Deploy-from-commit requires a local cloned repo. " + (cloneErr ? `Clone error: ${cloneErr.slice(-500)}` : ""),
+              airtable: airtableSync,
             });
           } catch (apiErr) {
             // fall through to clone error response
@@ -1130,6 +1206,9 @@ app.post("/api/projects/import-git", async (req, res) => {
       try {
         const { commits, count } = syncProjectCommitsFromRepo(project.id, repoDir, repoUrl);
         setProjectGitHub(project.id, repoUrl, "", "main");
+        let airtableSync = { project: null, commits: null };
+        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
+        try { airtableSync.commits = await syncCommitsToAirtable(commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
         return res.status(201).json({
           project: getProjectById(project.id) || project,
           message: "Repository imported successfully",
@@ -1137,10 +1216,13 @@ app.post("/api/projects/import-git", async (req, res) => {
           commits,
           count,
           commitCount: count,
+          airtable: airtableSync,
         });
       } catch (gitErr) {
         console.error("Failed to fetch/store git commits:", gitErr.message);
         try { setProjectGitHub(project.id, repoUrl, "", "main"); } catch {}
+        let airtableSync = { project: null, commits: null };
+        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
         return res.status(201).json({
           project: getProjectById(project.id) || project,
           message: "Repository imported, but commits could not be loaded automatically.",
@@ -1149,6 +1231,7 @@ app.post("/api/projects/import-git", async (req, res) => {
           count: 0,
           commitCount: 0,
           warning: gitErr.message,
+          airtable: airtableSync,
         });
       }
     });
@@ -1159,6 +1242,9 @@ app.post("/api/projects/import-git", async (req, res) => {
         try {
           const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
           setProjectGitHub(project.id, repoUrl, "", "main");
+          let airtableSync = { project: null, commits: null };
+          try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
+          try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
           return res.status(201).json({
             project: getProjectById(project.id) || project,
             message: "Repository imported via GitHub API (git not installed).",
@@ -1167,6 +1253,7 @@ app.post("/api/projects/import-git", async (req, res) => {
             count: result.count,
             commitCount: result.commitCount,
             warning: `Git is not available in this runtime (${err.message}). Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo with git.`,
+            airtable: airtableSync,
           });
         } catch (apiErr) {
           // fall through
