@@ -1048,7 +1048,7 @@ app.post("/api/projects/:projectId/github/sync", async (req, res) => {
   }
 });
 
-app.post("/api/projects/import-git", (req, res) => {
+app.post("/api/projects/import-git", async (req, res) => {
   try {
     const { repoUrl, projectName } = req.body;
 
@@ -1069,12 +1069,56 @@ app.post("/api/projects/import-git", (req, res) => {
     fs.mkdirSync(projectWorkspace, { recursive: true });
 
     const repoDir = path.join(projectWorkspace, "repo");
-    const gitClone = spawn("git", ["clone", "--no-tags", repoUrl, repoDir], { cwd: projectWorkspace });
+    let gitClone;
+    try {
+      gitClone = spawn("git", ["clone", "--no-tags", String(repoUrl), repoDir], { cwd: projectWorkspace });
+    } catch (spawnErr) {
+      // Synchronous spawn failure (rare) - try GitHub API fallback
+      if (parseGitHubRepoUrl(repoUrl)) {
+        try {
+          const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
+          setProjectGitHub(project.id, repoUrl, "", "main");
+          return res.status(201).json({
+            project: getProjectById(project.id) || project,
+            message: "Repository imported via GitHub API (git unavailable).",
+            path: null,
+            commits: result.commits,
+            count: result.count,
+            commitCount: result.commitCount,
+            warning: "Git clone unavailable in this runtime. Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo.",
+          });
+        } catch (apiErr) {
+          try { deleteProject(project.id); } catch {}
+          return res.status(500).json({ error: "Failed to clone repository", message: apiErr.message || spawnErr.message });
+        }
+      }
+      try { deleteProject(project.id); } catch {}
+      return res.status(500).json({ error: "Failed to clone repository", message: spawnErr.message });
+    }
+
     let cloneErr = "";
     gitClone.stderr && gitClone.stderr.on("data", (d) => { cloneErr += d.toString(); });
 
-    gitClone.on("close", (code) => {
+    gitClone.on("close", async (code) => {
       if (code !== 0) {
+        // Fallback: GitHub API import when git clone fails (e.g. no git on Vercel, auth/network issues for public repos)
+        if (parseGitHubRepoUrl(repoUrl)) {
+          try {
+            const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
+            setProjectGitHub(project.id, repoUrl, "", "main");
+            return res.status(201).json({
+              project: getProjectById(project.id) || project,
+              message: "Repository imported via GitHub API (git clone unavailable/failed).",
+              path: null,
+              commits: result.commits,
+              count: result.count,
+              commitCount: result.commitCount,
+              warning: "Git clone failed in this runtime; commits loaded via GitHub API. Deploy-from-commit requires a local cloned repo. " + (cloneErr ? `Clone error: ${cloneErr.slice(-500)}` : ""),
+            });
+          } catch (apiErr) {
+            // fall through to clone error response
+          }
+        }
         try { deleteProject(project.id); } catch {}
         return res.status(500).json({
           error: "Failed to clone repository",
@@ -1109,11 +1153,29 @@ app.post("/api/projects/import-git", (req, res) => {
       }
     });
 
-    gitClone.on("error", (err) => {
+    gitClone.on("error", async (err) => {
+      // Fallback for environments without git binary (common on Vercel serverless)
+      if (parseGitHubRepoUrl(repoUrl)) {
+        try {
+          const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
+          setProjectGitHub(project.id, repoUrl, "", "main");
+          return res.status(201).json({
+            project: getProjectById(project.id) || project,
+            message: "Repository imported via GitHub API (git not installed).",
+            path: null,
+            commits: result.commits,
+            count: result.count,
+            commitCount: result.commitCount,
+            warning: `Git is not available in this runtime (${err.message}). Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo with git.`,
+          });
+        } catch (apiErr) {
+          // fall through
+        }
+      }
       try { deleteProject(project.id); } catch {}
       return res.status(500).json({
         error: "Failed to clone repository",
-        message: err.message,
+        message: err.message || "Git clone failed",
       });
     });
   } catch (err) {
