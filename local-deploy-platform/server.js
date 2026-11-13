@@ -114,6 +114,22 @@ async function fetchCommitsFromGitHub(owner, repo, token, branch = "main", perPa
   return { commits, count: commits.length };
 }
 
+function parseGitHubRepoUrl(repoUrl) {
+  const m = String(repoUrl).match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?(?:\/|$)/);
+  if (!m) return null;
+  return { owner: m[1], repo: m[2] };
+}
+
+async function importCommitsViaGitHubApi(projectId, repoUrl, token, branch = "main") {
+  const parsed = parseGitHubRepoUrl(repoUrl);
+  if (!parsed) throw new Error("Invalid GitHub repository URL");
+  const commits = await fetchCommitsFromGitHub(parsed.owner, parsed.repo, token, branch);
+  for (const c of commits) {
+    upsertCommit(projectId, c.sha, c.message, c.authorName, c.authorEmail, c.authorDate, c.url, c.htmlUrl);
+  }
+  return { commits, count: commits.length };
+}
+
 const app = express();
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
