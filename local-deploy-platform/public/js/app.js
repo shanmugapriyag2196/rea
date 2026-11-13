@@ -103,6 +103,38 @@ async function loadOverview() {
   }
 }
 
+function renderProjectRows(items) {
+  const tbody = document.getElementById("projects-table-body");
+  const empty = document.getElementById("projects-empty");
+  const list = document.getElementById("projects-list");
+  if (!items.length) {
+    if (list) list.style.display = "none";
+    if (empty) {
+      empty.style.display = "flex";
+      empty.innerHTML = `<h2>No projects</h2><p>No records found.</p>`;
+    }
+    if (tbody) tbody.innerHTML = "";
+    return;
+  }
+  if (list) list.style.display = "block";
+  if (empty) empty.style.display = "none";
+  if (tbody) {
+    tbody.innerHTML = items.map((p) => {
+      const url = p.repositoryUrl ? String(p.repositoryUrl) : "";
+      const safeUrl = /^https?:\/\//i.test(url) ? url : "";
+      const name = escapeHtml(p.name || "-");
+      const urlCell = safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener" class="commit-link">${escapeHtml(safeUrl)}</a>` : (url ? escapeHtml(url) : "-");
+      const created = p.createdAt ? escapeHtml(String(p.createdAt)) : "-";
+      return `<tr>
+        <td>${name}</td>
+        <td class="commit-message">${urlCell}</td>
+        <td>${escapeHtml(p.framework || "-")}</td>
+        <td>${created}</td>
+      </tr>`;
+    }).join("");
+  }
+}
+
 async function loadProjects() {
   const tbody = document.getElementById("projects-table-body");
   const empty = document.getElementById("projects-empty");
@@ -110,34 +142,25 @@ async function loadProjects() {
   try {
     const data = await api("/airtable/projects");
     const items = Array.isArray(data.projects) ? data.projects : [];
-    projects = items.map((p) => ({ ...p, id: p.id || p.name })); // minimal local shape
-    if (!items.length) {
-      if (list) list.style.display = "none";
-      if (empty) {
-        empty.style.display = "flex";
-        empty.innerHTML = `<h2>No projects</h2><p>No records found in Airtable Projects table.</p>`;
-      }
-      if (tbody) tbody.innerHTML = "";
-      return;
-    }
-    if (list) list.style.display = "block";
-    if (empty) empty.style.display = "none";
-    if (tbody) {
-      tbody.innerHTML = items.map((p) => {
-        const url = p.repositoryUrl ? String(p.repositoryUrl) : "";
-        const safeUrl = /^https?:\/\//i.test(url) ? url : "";
-        const name = escapeHtml(p.name || "-");
-        const urlCell = safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener" class="commit-link">${escapeHtml(safeUrl)}</a>` : (url ? escapeHtml(url) : "-");
-        const created = p.createdAt ? escapeHtml(String(p.createdAt)) : "-";
-        return `<tr>
-          <td>${name}</td>
-          <td class="commit-message">${urlCell}</td>
-          <td>${escapeHtml(p.framework || "-")}</td>
-          <td>${created}</td>
-        </tr>`;
-      }).join("");
-    }
+    projects = items.map((p) => ({ ...p, id: p.id || p.name }));
+    renderProjectRows(projects);
   } catch (err) {
+    // Fall back to local SQLite DB when Airtable is not configured or unreachable
+    try {
+      const localData = await api("/api/projects");
+      const localItems = Array.isArray(localData) ? localData : [];
+      projects = localItems.map((p) => ({
+        id: p.id,
+        name: p.name,
+        repositoryUrl: p.github_repo_url || "",
+        createdAt: p.created_at ? new Date(p.created_at).toISOString() : "",
+        framework: p.framework || "static",
+      }));
+      renderProjectRows(projects);
+      return;
+    } catch (localErr) {
+      // Both Airtable and local DB failed - fall through to error UI
+    }
     if (list) list.style.display = "none";
     if (empty) {
       empty.style.display = "flex";
@@ -599,9 +622,13 @@ document.addEventListener("DOMContentLoaded", () => {
   };
 
   document.getElementById("do-import-git")?.addEventListener("click", async () => {
+    const btn = document.getElementById("do-import-git");
     const repoUrl = document.getElementById("import-repo-url").value;
     const projectName = document.getElementById("import-repo-name").value;
     if (!repoUrl || !projectName) return showToast("Repo URL and name required", "error");
+    if (btn.dataset.importing === "true") return showToast("Import already in progress", "info");
+    btn.dataset.importing = "true";
+    btn.disabled = true;
     try {
       showToast("Importing repository and syncing to Airtable...", "info");
       const result = await api("/projects/import-git", {
@@ -621,6 +648,9 @@ document.addEventListener("DOMContentLoaded", () => {
       setTimeout(() => navigateTo("projects"), 300);
     } catch (err) {
       showToast(err.message, "error");
+    } finally {
+      btn.dataset.importing = "false";
+      btn.disabled = false;
     }
   });
 
