@@ -2,6 +2,7 @@
   "installCommand": "npm --prefix local-deploy-platform install",
   "framework": null,
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index.js" }
+    { "source": "/api/(.*)", "destination": "/api/[...path].js" },
+    { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
