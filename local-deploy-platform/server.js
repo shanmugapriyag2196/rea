@@ -1137,70 +1137,72 @@ app.post("/api/projects/import-git", async (req, res) => {
     fs.mkdirSync(projectWorkspace, { recursive: true });
 
     const repoDir = path.join(projectWorkspace, "repo");
+    let responded = false;
+
+    const sendJson = (status, body) => {
+      if (responded) return;
+      responded = true;
+      res.status(status).json(body);
+    };
+
+    const tryGitHubApiFallback = async (reason) => {
+      try {
+        const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
+        setProjectGitHub(project.id, repoUrl, "", "main");
+        let airtableSync = { project: null, commits: null };
+        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
+        try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
+        sendJson(201, {
+          project: getProjectById(project.id) || project,
+          message: `Repository imported via GitHub API (${reason}).`,
+          path: null,
+          commits: result.commits,
+          count: result.count,
+          commitCount: result.commitCount,
+          warning: `Git clone ${reason} in this runtime. Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo with git.`,
+          airtable: airtableSync,
+        });
+        return true;
+      } catch (apiErr) {
+        console.error("GitHub API fallback failed:", apiErr.message);
+        return false;
+      }
+    };
+
     let gitClone;
     try {
       gitClone = spawn("git", ["clone", "--no-tags", String(repoUrl), repoDir], { cwd: projectWorkspace });
     } catch (spawnErr) {
       // Synchronous spawn failure (rare) - try GitHub API fallback
       if (parseGitHubRepoUrl(repoUrl)) {
-        try {
-          const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
-          setProjectGitHub(project.id, repoUrl, "", "main");
-          let airtableSync = { project: null, commits: null };
-          try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
-          try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
-          return res.status(201).json({
-            project: getProjectById(project.id) || project,
-            message: "Repository imported via GitHub API (git unavailable).",
-            path: null,
-            commits: result.commits,
-            count: result.count,
-            commitCount: result.commitCount,
-            warning: "Git clone unavailable in this runtime. Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo.",
-            airtable: airtableSync,
-          });
-        } catch (apiErr) {
+        await tryGitHubApiFallback("git unavailable");
+        if (!responded) {
           try { deleteProject(project.id); } catch {}
-          return res.status(500).json({ error: "Failed to clone repository", message: apiErr.message || spawnErr.message });
+          sendJson(500, { error: "Failed to clone repository", message: spawnErr.message });
         }
+      } else {
+        try { deleteProject(project.id); } catch {}
+        sendJson(500, { error: "Failed to clone repository", message: spawnErr.message });
       }
-      try { deleteProject(project.id); } catch {}
-      return res.status(500).json({ error: "Failed to clone repository", message: spawnErr.message });
+      return;
     }
 
     let cloneErr = "";
     gitClone.stderr && gitClone.stderr.on("data", (d) => { cloneErr += d.toString(); });
 
-    gitClone.on("close", async (code) => {
+    const handleCloneResult = async (code, reason) => {
       if (code !== 0) {
-        // Fallback: GitHub API import when git clone fails (e.g. no git on Vercel, auth/network issues for public repos)
         if (parseGitHubRepoUrl(repoUrl)) {
-          try {
-            const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
-            setProjectGitHub(project.id, repoUrl, "", "main");
-            let airtableSync = { project: null, commits: null };
-            try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
-            try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
-            return res.status(201).json({
-              project: getProjectById(project.id) || project,
-              message: "Repository imported via GitHub API (git clone unavailable/failed).",
-              path: null,
-              commits: result.commits,
-              count: result.count,
-              commitCount: result.commitCount,
-              warning: "Git clone failed in this runtime; commits loaded via GitHub API. Deploy-from-commit requires a local cloned repo. " + (cloneErr ? `Clone error: ${cloneErr.slice(-500)}` : ""),
-              airtable: airtableSync,
-            });
-          } catch (apiErr) {
-            // fall through to clone error response
-          }
+          const ok = await tryGitHubApiFallback(reason);
+          if (ok) return;
         }
         try { deleteProject(project.id); } catch {}
-        return res.status(500).json({
+        sendJson(500, {
           error: "Failed to clone repository",
           message: "Git clone failed. Check the URL and permissions.",
           details: cloneErr.slice(-4000),
         });
+        return;
       }
 
       try {
@@ -1209,7 +1211,7 @@ app.post("/api/projects/import-git", async (req, res) => {
         let airtableSync = { project: null, commits: null };
         try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
         try { airtableSync.commits = await syncCommitsToAirtable(commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
-        return res.status(201).json({
+        sendJson(201, {
           project: getProjectById(project.id) || project,
           message: "Repository imported successfully",
           path: repoDir,
@@ -1223,7 +1225,7 @@ app.post("/api/projects/import-git", async (req, res) => {
         try { setProjectGitHub(project.id, repoUrl, "", "main"); } catch {}
         let airtableSync = { project: null, commits: null };
         try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
-        return res.status(201).json({
+        sendJson(201, {
           project: getProjectById(project.id) || project,
           message: "Repository imported, but commits could not be loaded automatically.",
           path: repoDir,
@@ -1234,36 +1236,15 @@ app.post("/api/projects/import-git", async (req, res) => {
           airtable: airtableSync,
         });
       }
+    };
+
+    gitClone.on("close", async (code) => {
+      await handleCloneResult(code, "clone failed");
     });
 
     gitClone.on("error", async (err) => {
       // Fallback for environments without git binary (common on Vercel serverless)
-      if (parseGitHubRepoUrl(repoUrl)) {
-        try {
-          const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
-          setProjectGitHub(project.id, repoUrl, "", "main");
-          let airtableSync = { project: null, commits: null };
-          try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
-          try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
-          return res.status(201).json({
-            project: getProjectById(project.id) || project,
-            message: "Repository imported via GitHub API (git not installed).",
-            path: null,
-            commits: result.commits,
-            count: result.count,
-            commitCount: result.commitCount,
-            warning: `Git is not available in this runtime (${err.message}). Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo with git.`,
-            airtable: airtableSync,
-          });
-        } catch (apiErr) {
-          // fall through
-        }
-      }
-      try { deleteProject(project.id); } catch {}
-      return res.status(500).json({
-        error: "Failed to clone repository",
-        message: err.message || "Git clone failed",
-      });
+      await handleCloneResult(-1, `not available (${err.message})`);
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to import repository", message: err.message });
