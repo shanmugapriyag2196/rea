@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("NativeAotFixture")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8e32c010913dc730095d64ec39f088d38b784f8c")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4f165c87753ba96a5ab81e4539b29c546f64b61c")]
 [assembly: System.Reflection.AssemblyProductAttribute("NativeAotFixture")]
 [assembly: System.Reflection.AssemblyTitleAttribute("NativeAotFixture")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
