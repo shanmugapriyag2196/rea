@@ -631,9 +631,12 @@ document.addEventListener("DOMContentLoaded", () => {
     btn.disabled = true;
     try {
       showToast("Importing repository and syncing to Airtable...", "info");
+      const githubToken = (document.getElementById("github-token-input")?.value || "").trim();
+      const payload = { repoUrl, projectName };
+      if (githubToken) payload.githubToken = githubToken;
       const result = await api("/projects/import-git", {
         method: "POST",
-        body: JSON.stringify({ repoUrl, projectName }),
+        body: JSON.stringify(payload),
       });
       document.getElementById("github-import-modal").classList.remove("open");
       const at = result.airtable || {};
