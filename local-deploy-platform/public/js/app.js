@@ -123,10 +123,11 @@ function renderProjectRows(items) {
       const url = p.repositoryUrl ? String(p.repositoryUrl) : "";
       const safeUrl = /^https?:\/\//i.test(url) ? url : "";
       const name = escapeHtml(p.name || "-");
-      const urlCell = safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener" class="commit-link">${escapeHtml(safeUrl)}</a>` : (url ? escapeHtml(url) : "-");
+      const urlCell = safeUrl ? `<a href="${escapeHtml(safeUrl)}" target="_blank" rel="noopener" class="commit-link" onclick="event.stopPropagation()">${escapeHtml(safeUrl)}</a>` : (url ? escapeHtml(url) : "-");
       const created = p.createdAt ? escapeHtml(String(p.createdAt)) : "-";
-      return `<tr>
-        <td>${name}</td>
+      const pid = escapeHtml(String(p.id || ""));
+      return `<tr onclick="window.viewProject('${pid}')" style="cursor:pointer">
+        <td><span class="commit-link">${name}</span></td>
         <td class="commit-message">${urlCell}</td>
         <td>${escapeHtml(p.framework || "-")}</td>
         <td>${created}</td>
@@ -349,22 +350,45 @@ function loadProjectDeployments(projectId) {
 async function loadProjectDetailCommits(projectId) {
   const tbody = document.getElementById("project-detail-commits-body");
   if (!tbody) return;
-  try {
-    const data = await api(`/projects/${projectId}/github/commits`);
-    const commits = data.commits || [];
-    if (commits.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="4">No commits found</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
+  const project = projects.find((p) => String(p.id) === String(projectId));
+  const projectName = project ? String(project.name || "") : "";
+
+  const render = (commits) => {
+    if (!commits.length) {
+      tbody.innerHTML = '<tr><td colspan="4">No commits found for this project</td></tr>';
       return;
     }
-    tbody.innerHTML = commits.map((c) => `
-      <tr>
-        <td><code>${c.sha.slice(0, 7)}</code></td>
-        <td>${escapeHtml((c.message || "").split("\n")[0])}</td>
-        <td>${escapeHtml(c.authorName || "")}</td>
-        <td>${formatDate(c.authorDate || c.created_at)}</td>
-      </tr>`).join("");
-  } catch {
-    tbody.innerHTML = '<tr><td colspan="4">No commits available</td></tr>';
+    tbody.innerHTML = commits.map((c) => {
+      const sha = String(c.sha || c.commitHash || "");
+      const short = sha ? sha.slice(0, 7) : "—";
+      const msg = escapeHtml(((c.message || c.commitMessage || "") + "").split("\n")[0] || "—");
+      const author = escapeHtml(c.authorName || c.author || "—");
+      const date = formatDate(c.authorDate || c.author_date || c.timestamp || c.created_at);
+      return `<tr>
+        <td><code>${short}</code></td>
+        <td>${msg}</td>
+        <td>${author}</td>
+        <td>${date}</td>
+      </tr>`;
+    }).join("");
+  };
+
+  // Try local DB first (works locally)
+  try {
+    const data = await api(`/projects/${projectId}/github/commits`);
+    const local = Array.isArray(data.commits) ? data.commits : [];
+    if (local.length) { render(local); return; }
+  } catch {}
+
+  // Fallback: Airtable commits filtered by project name (works on Vercel)
+  try {
+    const data = await api("/airtable/commits");
+    const all = Array.isArray(data.commits) ? data.commits : [];
+    const filtered = projectName ? all.filter((c) => String(c.projectName || "") === projectName) : all;
+    render(filtered);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4">No commits available: ${escapeHtml(err.message || "error")}</td></tr>`;
   }
 }
 
