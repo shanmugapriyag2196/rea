@@ -71,19 +71,24 @@ async function fetchCommitsFromGitHub(owner, repo, token, branch = "main", perPa
   const commits = [];
   let page = 1;
   let hasMore = true;
+  const authToken = (token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
 
   while (hasMore) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/commits?sha=${branch}&per_page=${perPage}&page=${page}`;
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `token ${token}`,
-        "User-Agent": "VG-Deploy-Platform",
-        Accept: "application/vnd.github.v3+json",
-      },
-    });
+    const url = `https://api.github.com/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(branch)}&per_page=${perPage}&page=${page}`;
+    const headers = {
+      "User-Agent": "VG-Deploy-Platform",
+      Accept: "application/vnd.github+json",
+    };
+    if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
+    const response = await fetch(url, { headers });
     if (!response.ok) {
-      throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
+      let detail = "";
+      try { const body = await response.json(); detail = body && body.message ? String(body.message) : ""; } catch {}
+      const err = new Error(detail || `GitHub API error: ${response.status} ${response.statusText}`);
+      err.status = response.status;
+      err.code = "GITHUB_API_ERROR";
+      throw err;
     }
 
     const data = await response.json();
@@ -95,35 +100,76 @@ async function fetchCommitsFromGitHub(owner, repo, token, branch = "main", perPa
     for (const c of data) {
       commits.push({
         sha: c.sha,
-        message: c.commit.message,
-        authorName: c.commit.author?.name || "Unknown",
-        authorEmail: c.commit.author?.email || "",
-        authorDate: c.commit.author?.date || "",
+        message: c.commit?.message || "",
+        authorName: c.commit?.author?.name || c.author?.login || "Unknown",
+        authorEmail: c.commit?.author?.email || "",
+        authorDate: c.commit?.author?.date || "",
         url: c.url,
         htmlUrl: c.html_url,
       });
     }
 
-    if (data.length < perPage) {
-      hasMore = false;
-    } else {
-      page++;
-    }
+    if (data.length < perPage) hasMore = false;
+    else page++;
   }
 
-  return { commits, count: commits.length };
+  return commits;
+}
+
+async function verifyGitHubRepoAccess(owner, repo, token) {
+  const authToken = (token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+  const headers = {
+    "User-Agent": "VG-Deploy-Platform",
+    Accept: "application/vnd.github+json",
+  };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, { headers });
+  let body = null;
+  try { body = await res.json(); } catch {}
+  if (!res.ok) {
+    const err = new Error(body && body.message ? String(body.message) : `GitHub API error: ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    err.code = "GITHUB_REPO_ACCESS";
+    throw err;
+  }
+  return body || {};
 }
 
 function parseGitHubRepoUrl(repoUrl) {
-  const m = String(repoUrl).match(/github\.com[:/]([^/]+)\/([^/]+?)(?:\.git)?(?:\/|$)/);
-  if (!m) return null;
-  return { owner: m[1], repo: m[2] };
+  try {
+    const raw = String(repoUrl || "").trim();
+    if (!raw) return null;
+    let u;
+    try {
+      u = new URL(raw);
+    } catch {
+      // try https prefix for bare github.com/... or owner/repo not supported; require full URL
+      return null;
+    }
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    if (u.hostname.toLowerCase() !== "github.com" && u.hostname.toLowerCase() !== "www.github.com") return null;
+    const parts = u.pathname.split("/").filter(Boolean);
+    if (parts.length < 2) return null;
+    const owner = parts[0];
+    let repo = parts[1].replace(/\.git$/i, "");
+    if (!owner || !repo) return null;
+    if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo)) return null;
+    return { owner, repo };
+  } catch {
+    return null;
+  }
 }
 
 async function importCommitsViaGitHubApi(projectId, repoUrl, token, branch = "main") {
   const parsed = parseGitHubRepoUrl(repoUrl);
-  if (!parsed) throw new Error("Invalid GitHub repository URL");
-  const commits = await fetchCommitsFromGitHub(parsed.owner, parsed.repo, token, branch);
+  if (!parsed) {
+    const err = new Error("Invalid GitHub repository URL. Use https://github.com/owner/repo");
+    err.status = 400;
+    err.code = "INVALID_REPO_URL";
+    throw err;
+  }
+  const authToken = (token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+  const commits = await fetchCommitsFromGitHub(parsed.owner, parsed.repo, authToken, branch);
   for (const c of commits) {
     upsertCommit(projectId, c.sha, c.message, c.authorName, c.authorEmail, c.authorDate, c.url, c.htmlUrl);
   }
@@ -1133,99 +1179,119 @@ app.post("/api/projects/:projectId/github/sync", async (req, res) => {
 });
 
 app.post("/api/projects/import-git", async (req, res) => {
+  const requestId = `imp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   try {
-    const { repoUrl, projectName } = req.body;
+    const { repoUrl, projectName, githubToken } = req.body || {};
 
     if (!repoUrl || typeof repoUrl !== "string") {
-      return res.status(400).json({ error: "Repository URL is required" });
+      return res.status(400).json({ error: "Repository URL is required", requestId });
     }
-    if (!projectName || typeof projectName !== "string") {
-      return res.status(400).json({ error: "Project name is required" });
+    if (!projectName || typeof projectName !== "string" || !projectName.trim()) {
+      return res.status(400).json({ error: "Project name is required", requestId });
     }
 
     const trimmed = projectName.trim();
+    if (trimmed.length > 100) {
+      return res.status(400).json({ error: "Project name must be 100 characters or fewer", requestId });
+    }
+    if (/[<>:"/\\|?*\x00-\x1f]/.test(trimmed)) {
+      return res.status(400).json({ error: "Project name contains invalid characters", requestId });
+    }
     if (getProjectByName(trimmed)) {
-      return res.status(409).json({ error: "Project with this name already exists" });
+      return res.status(409).json({ error: "Project with this name already exists", requestId });
     }
 
-    const project = createProject(trimmed, `Imported from ${repoUrl}`, "static");
+    const parsedRepo = parseGitHubRepoUrl(repoUrl);
+    if (!parsedRepo) {
+      return res.status(400).json({ error: "Invalid repository URL. Use a valid GitHub HTTPS URL (https://github.com/owner/repo).", requestId });
+    }
+
+    const authToken = (typeof githubToken === "string" ? githubToken : "").trim() || (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+    let repoMeta = null;
+    try {
+      repoMeta = await verifyGitHubRepoAccess(parsedRepo.owner, parsedRepo.repo, authToken);
+    } catch (e) {
+      const status = e.status || 500;
+      if (status === 401) return res.status(401).json({ error: "Missing or invalid GitHub authentication for this repository", requestId });
+      if (status === 403) return res.status(403).json({ error: "No permission to access this repository (or GitHub API rate limit reached). Provide a valid GitHub token for private repos.", requestId });
+      if (status === 404) return res.status(404).json({ error: "Repository not found or inaccessible", requestId });
+      console.error(`[${requestId}] GitHub repo access check failed:`, e.message);
+      return res.status(502).json({ error: "Failed to verify repository access with GitHub", requestId });
+    }
+
+    const defaultBranch = (repoMeta && repoMeta.default_branch) ? String(repoMeta.default_branch) : "main";
+    const canonicalRepoUrl = (repoMeta && repoMeta.clone_url) ? String(repoMeta.clone_url) : String(repoUrl).trim();
+
+    const project = createProject(trimmed, `Imported from ${parsedRepo.owner}/${parsedRepo.repo}`, "static");
     const projectWorkspace = path.join(WORKSPACE_DIR, project.id);
-    fs.mkdirSync(projectWorkspace, { recursive: true });
+    try { fs.mkdirSync(projectWorkspace, { recursive: true }); } catch (e) { console.warn(`[${requestId}] mkdir workspace failed:`, e.message); }
 
-    const repoDir = path.join(projectWorkspace, "repo");
     let responded = false;
-
     const sendJson = (status, body) => {
       if (responded) return;
       responded = true;
-      res.status(status).json(body);
+      res.status(status).json({ ...body, requestId });
     };
 
-    const tryGitHubApiFallback = async (reason) => {
+    const finalizeWithGitHubImport = async (reason) => {
       try {
-        const result = await importCommitsViaGitHubApi(project.id, repoUrl, "", "main");
-        setProjectGitHub(project.id, repoUrl, "", "main");
+        const commits = await importCommitsViaGitHubApi(project.id, canonicalRepoUrl, authToken, defaultBranch);
+        setProjectGitHub(project.id, canonicalRepoUrl, "", defaultBranch);
         let airtableSync = { project: null, commits: null };
-        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
-        try { airtableSync.commits = await syncCommitsToAirtable(result.commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
+        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, canonicalRepoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
+        try { airtableSync.commits = await syncCommitsToAirtable(commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
         sendJson(201, {
           project: getProjectById(project.id) || project,
           message: `Repository imported via GitHub API (${reason}).`,
           path: null,
-          commits: result.commits,
-          count: result.count,
-          commitCount: result.commitCount,
+          commits,
+          count: commits.length,
+          commitCount: commits.length,
           warning: `Git clone ${reason} in this runtime. Commits loaded via GitHub API; deploy-from-commit requires a local cloned repo with git.`,
           airtable: airtableSync,
         });
         return true;
       } catch (apiErr) {
-        console.error("GitHub API fallback failed:", apiErr.message);
+        console.error(`[${requestId}] GitHub import failed:`, apiErr.message);
         return false;
       }
     };
 
+    // On Vercel/serverless, git is often unavailable and FS is ephemeral - prefer GitHub API import
+    if (IS_VERCEL || !parseGitHubRepoUrl(canonicalRepoUrl)) {
+      const ok = await finalizeWithGitHubImport(IS_VERCEL ? "serverless runtime" : "git unavailable");
+      if (ok) return;
+      try { deleteProject(project.id); } catch {}
+      return res.status(502).json({ error: "Failed to import repository commits from GitHub", requestId });
+    }
+
+    const repoDir = path.join(projectWorkspace, "repo");
     let gitClone;
     try {
-      gitClone = spawn("git", ["clone", "--no-tags", String(repoUrl), repoDir], { cwd: projectWorkspace });
+      gitClone = spawn("git", ["clone", "--no-tags", "--branch", defaultBranch, canonicalRepoUrl, repoDir], { cwd: projectWorkspace });
     } catch (spawnErr) {
-      // Synchronous spawn failure (rare) - try GitHub API fallback
-      if (parseGitHubRepoUrl(repoUrl)) {
-        await tryGitHubApiFallback("git unavailable");
-        if (!responded) {
-          try { deleteProject(project.id); } catch {}
-          sendJson(500, { error: "Failed to clone repository", message: spawnErr.message });
-        }
-      } else {
-        try { deleteProject(project.id); } catch {}
-        sendJson(500, { error: "Failed to clone repository", message: spawnErr.message });
-      }
-      return;
+      const ok = await finalizeWithGitHubImport("git unavailable");
+      if (ok) return;
+      try { deleteProject(project.id); } catch {}
+      return res.status(500).json({ error: "Failed to clone repository", requestId });
     }
 
     let cloneErr = "";
     gitClone.stderr && gitClone.stderr.on("data", (d) => { cloneErr += d.toString(); });
 
-    const handleCloneResult = async (code, reason) => {
+    gitClone.on("close", async (code) => {
       if (code !== 0) {
-        if (parseGitHubRepoUrl(repoUrl)) {
-          const ok = await tryGitHubApiFallback(reason);
-          if (ok) return;
-        }
+        const ok = await finalizeWithGitHubImport("clone failed");
+        if (ok) return;
         try { deleteProject(project.id); } catch {}
-        sendJson(500, {
-          error: "Failed to clone repository",
-          message: "Git clone failed. Check the URL and permissions.",
-          details: cloneErr.slice(-4000),
-        });
-        return;
+        console.error(`[${requestId}] Git clone failed:`, cloneErr.slice(-500));
+        return sendJson(502, { error: "Failed to clone repository. Check repository access and URL.", details: undefined });
       }
-
       try {
-        const { commits, count } = syncProjectCommitsFromRepo(project.id, repoDir, repoUrl);
-        setProjectGitHub(project.id, repoUrl, "", "main");
+        const { commits, count } = syncProjectCommitsFromRepo(project.id, repoDir, canonicalRepoUrl);
+        setProjectGitHub(project.id, canonicalRepoUrl, "", defaultBranch);
         let airtableSync = { project: null, commits: null };
-        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
+        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, canonicalRepoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
         try { airtableSync.commits = await syncCommitsToAirtable(commits, trimmed); } catch (e) { airtableSync.commits = { ok: false, error: e.message }; }
         sendJson(201, {
           project: getProjectById(project.id) || project,
@@ -1237,33 +1303,23 @@ app.post("/api/projects/import-git", async (req, res) => {
           airtable: airtableSync,
         });
       } catch (gitErr) {
-        console.error("Failed to fetch/store git commits:", gitErr.message);
-        try { setProjectGitHub(project.id, repoUrl, "", "main"); } catch {}
-        let airtableSync = { project: null, commits: null };
-        try { airtableSync.project = await syncProjectToAirtable(getProjectById(project.id) || project, repoUrl); } catch (e) { airtableSync.project = { ok: false, error: e.message }; }
-        sendJson(201, {
-          project: getProjectById(project.id) || project,
-          message: "Repository imported, but commits could not be loaded automatically.",
-          path: repoDir,
-          commits: [],
-          count: 0,
-          commitCount: 0,
-          warning: gitErr.message,
-          airtable: airtableSync,
-        });
+        console.error(`[${requestId}] Post-clone commit sync failed:`, gitErr.message);
+        const ok = await finalizeWithGitHubImport("local commit sync failed");
+        if (ok) return;
+        try { deleteProject(project.id); } catch {}
+        sendJson(500, { error: "Repository imported but commits could not be loaded", requestId });
       }
-    };
-
-    gitClone.on("close", async (code) => {
-      await handleCloneResult(code, "clone failed");
     });
 
     gitClone.on("error", async (err) => {
-      // Fallback for environments without git binary (common on Vercel serverless)
-      await handleCloneResult(-1, `not available (${err.message})`);
+      const ok = await finalizeWithGitHubImport(`git unavailable (${err.message})`);
+      if (ok) return;
+      try { deleteProject(project.id); } catch {}
+      sendJson(502, { error: "Failed to clone repository", requestId });
     });
   } catch (err) {
-    res.status(500).json({ error: "Failed to import repository", message: err.message });
+    console.error("Import-git unexpected error:", err && err.message ? err.message : err);
+    res.status(500).json({ error: "Failed to import repository", requestId, message: "Unexpected server error" });
   }
 });
 // ---------- Airtable dashboard APIs (read-only) ----------
