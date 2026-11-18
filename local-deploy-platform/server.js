@@ -287,20 +287,41 @@ async function syncProjectToAirtable(project, repoUrl) {
 async function syncCommitsToAirtable(commits, projectName) {
   const cfg = getAirtableConfig();
   if (!cfg.pat || !cfg.commitsTableId) return { skipped: true, reason: "Airtable PAT or Commits table ID not configured" };
-  const records = (commits || []).filter(c => c && c.sha).map((c) => {
-    const fields = {
-      CommitHash: c.sha,
-      CommitMessage: c.message || "",
-      Author: c.authorName || c.author_name || "",
-      ProjectName: projectName || c.projectName || "",
-    };
-    const ts = toAirtableDate(c.authorDate || c.author_date);
-    if (ts) fields.Timestamp = ts;
-    return fields;
-  });
-  if (!records.length) return { ok: true, count: 0 };
+  const incoming = (commits || []).filter(c => c && c.sha);
+  if (!incoming.length) return { ok: true, count: 0, created: 0, skippedExisting: 0 };
+
+  // Dedupe: avoid creating duplicate commits for the same project
+  let existing = new Set();
+  try {
+    const all = await airtableFetchAllRecords(cfg, cfg.commitsTableId);
+    for (const r of all) {
+      const f = r.fields || {};
+      const hash = String(af(f, "CommitHash", "Commit Hash", "Commit", "SHA") || "").trim();
+      const pn = String(af(f, "ProjectName", "Project Name", "Project") || "").trim();
+      if (hash && pn && pn === String(projectName || "").trim()) existing.add(hash);
+    }
+  } catch (e) {
+    // If dedupe check fails, proceed without dedupe but surface later if create fails
+    existing = new Set();
+  }
+
+  const records = incoming
+    .filter((c) => !existing.has(String(c.sha).trim()))
+    .map((c) => {
+      const fields = {
+        CommitHash: c.sha,
+        CommitMessage: c.message || "",
+        Author: c.authorName || c.author_name || "",
+        ProjectName: projectName || c.projectName || "",
+      };
+      const ts = toAirtableDate(c.authorDate || c.author_date);
+      if (ts) fields.Timestamp = ts;
+      return fields;
+    });
+
+  if (!records.length) return { ok: true, count: 0, created: 0, skippedExisting: incoming.length };
   const recs = await airtableCreateRecords(cfg, cfg.commitsTableId, records);
-  return { ok: true, count: recs.length };
+  return { ok: true, count: recs.length, created: recs.length, skippedExisting: incoming.length - records.length, total: incoming.length };
 }
 
 function af(fields, ...names) {
@@ -1175,6 +1196,65 @@ app.post("/api/projects/:projectId/github/sync", async (req, res) => {
     res.json({ success: true, commits, count, commitCount: count });
   } catch (err) {
     res.status(500).json({ error: "Failed to sync commits", message: err.message });
+  }
+});
+
+app.post("/api/projects/sync-commits", async (req, res) => {
+  const requestId = `sync_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  try {
+    const { projectName, repoUrl, githubToken } = req.body || {};
+    if (!projectName || typeof projectName !== "string" || !projectName.trim()) {
+      return res.status(400).json({ error: "Project name is required", requestId });
+    }
+    if (!repoUrl || typeof repoUrl !== "string") {
+      return res.status(400).json({ error: "Repository URL is required", requestId });
+    }
+    const parsedRepo = parseGitHubRepoUrl(repoUrl);
+    if (!parsedRepo) {
+      return res.status(400).json({ error: "Invalid repository URL. Use a valid GitHub HTTPS URL (https://github.com/owner/repo).", requestId });
+    }
+    const authToken = (typeof githubToken === "string" ? githubToken : "").trim() || (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+    let repoMeta = null;
+    try {
+      repoMeta = await verifyGitHubRepoAccess(parsedRepo.owner, parsedRepo.repo, authToken);
+    } catch (e) {
+      const status = e.status || 500;
+      if (status === 401) return res.status(401).json({ error: "Missing or invalid GitHub authentication for this repository", requestId });
+      if (status === 403) return res.status(403).json({ error: "No permission to access this repository (or GitHub API rate limit reached). Provide a valid GitHub token.", requestId });
+      if (status === 404) return res.status(404).json({ error: "Repository not found or inaccessible", requestId });
+      return res.status(502).json({ error: "Failed to verify repository access with GitHub", requestId });
+    }
+    const defaultBranch = (repoMeta && repoMeta.default_branch) ? String(repoMeta.default_branch) : "main";
+    const commits = await fetchCommitsFromGitHub(parsedRepo.owner, parsedRepo.repo, authToken, defaultBranch);
+    let airtableSync = null;
+    try {
+      airtableSync = await syncCommitsToAirtable(commits, projectName.trim());
+    } catch (e) {
+      airtableSync = { ok: false, error: e.message };
+    }
+    // Best-effort: update local DB if a matching project exists
+    try {
+      const local = getProjectByName(projectName.trim());
+      if (local) {
+        setProjectGitHub(local.id, (repoMeta && repoMeta.clone_url) ? String(repoMeta.clone_url) : String(repoUrl).trim(), "", defaultBranch);
+        for (const c of commits) {
+          upsertCommit(local.id, c.sha, c.message, c.authorName, c.authorEmail, c.authorDate, c.url, c.htmlUrl);
+        }
+      }
+    } catch {}
+    res.json({
+      ok: true,
+      requestId,
+      projectName: projectName.trim(),
+      repoUrl: (repoMeta && repoMeta.clone_url) ? String(repoMeta.clone_url) : String(repoUrl).trim(),
+      branch: defaultBranch,
+      commitCount: commits.length,
+      commits,
+      airtable: airtableSync,
+    });
+  } catch (err) {
+    console.error(`[sync-commits] unexpected:`, err && err.message ? err.message : err);
+    res.status(500).json({ error: "Failed to sync commits", requestId, message: err && err.message ? err.message : "Unexpected error" });
   }
 });
 

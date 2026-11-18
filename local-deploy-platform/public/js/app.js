@@ -303,6 +303,32 @@ function viewProject(id) {
   loadProjectDetailCommits(id);
 }
 
+async function syncCurrentProjectCommits() {
+  const project = projects.find((p) => String(p.id) === String(currentProjectId));
+  if (!project) return showToast("No project selected", "error");
+  const projectName = String(project.name || "").trim();
+  const repoUrl = String(project.repositoryUrl || project.github_repo_url || "").trim();
+  if (!repoUrl) return showToast("This project has no repository URL", "error");
+  const githubToken = (document.getElementById("github-token-input")?.value || localStorage.getItem("github_token") || "").trim();
+  try {
+    showToast(`Syncing commits for ${projectName}...`, "info");
+    const result = await api("/projects/sync-commits", {
+      method: "POST",
+      body: JSON.stringify({ projectName, repoUrl, ...(githubToken ? { githubToken } : {}) }),
+    });
+    const at = result.airtable || {};
+    const errs = [at.error, at.reason].filter(Boolean);
+    let msg = `Synced ${result.commitCount || 0} commits for ${projectName}`;
+    if (at.ok) msg += ` | Airtable: ${at.created ?? at.count ?? 0} new${at.skippedExisting ? `, ${at.skippedExisting} existing` : ""}`;
+    if (at.skipped) msg += ` | Airtable skipped: ${at.reason || "not configured"}`;
+    if (errs.length) msg += ` | Airtable issue: ${errs.join("; ")}`;
+    showToast(msg, errs.length ? "error" : "success");
+    await Promise.allSettled([loadProjectDetailCommits(currentProjectId), loadAllCommitsPage(), loadOverview(), loadProjects()]);
+  } catch (err) {
+    showToast(err.message || "Failed to sync commits", "error");
+  }
+}
+
 function openCommitInDashboard(projectId, sha) {
   if (!projectId) { showToast("No project for this commit", "error"); return; }
   const project = projects.find((p) => p.id === projectId);
@@ -586,6 +612,7 @@ async function deleteEnvVar(id, projectId) {
 }
 
 window.viewProject = viewProject;
+window.syncCurrentProjectCommits = syncCurrentProjectCommits;
 window.openCommitInDashboard = openCommitInDashboard;
 window.openCommitDeployment = openCommitDeployment;
 window.showDeploymentDetail = showDeploymentDetail;
