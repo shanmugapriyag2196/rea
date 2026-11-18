@@ -23,7 +23,24 @@ function escapeHtml(text) {
 
 function formatDate(ts) {
   if (!ts) return "-";
-  return new Date(ts).toLocaleString();
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function commitTimestamp(c) {
+  const v = c && (c.authorDate || c.author_date || c.timestamp || c.created_at || c.committedDate);
+  if (!v) return 0;
+  const t = new Date(v).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+function sortCommitsByTime(commits, desc = true) {
+  return [...(commits || [])].sort((a, b) => {
+    const ta = commitTimestamp(a), tb = commitTimestamp(b);
+    if (ta === tb) return String(b.sha || b.commitHash || "").localeCompare(String(a.sha || a.commitHash || ""));
+    return desc ? tb - ta : ta - tb;
+  });
 }
 
 function formatDuration(ms) {
@@ -376,26 +393,32 @@ function loadProjectDeployments(projectId) {
 async function loadProjectDetailCommits(projectId) {
   const tbody = document.getElementById("project-detail-commits-body");
   if (!tbody) return;
-  tbody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
   const project = projects.find((p) => String(p.id) === String(projectId));
   const projectName = project ? String(project.name || "") : "";
+  const repoUrl = project ? String(project.repositoryUrl || project.github_repo_url || "") : "";
 
   const render = (commits) => {
-    if (!commits.length) {
-      tbody.innerHTML = '<tr><td colspan="4">No commits found for this project</td></tr>';
+    const ordered = sortCommitsByTime(commits, true);
+    if (!ordered.length) {
+      tbody.innerHTML = '<tr><td colspan="5">No commits found for this project</td></tr>';
       return;
     }
-    tbody.innerHTML = commits.map((c) => {
+    tbody.innerHTML = ordered.map((c, i) => {
       const sha = String(c.sha || c.commitHash || "");
       const short = sha ? sha.slice(0, 7) : "—";
       const msg = escapeHtml(((c.message || c.commitMessage || "") + "").split("\n")[0] || "—");
       const author = escapeHtml(c.authorName || c.author || "—");
       const date = formatDate(c.authorDate || c.author_date || c.timestamp || c.created_at);
+      const shaCell = sha
+        ? `<a href="#" class="commit-link" onclick="event.preventDefault(); window.openCommitDeployment('${escapeHtml(String(projectId))}','${escapeHtml(sha)}','${escapeHtml(projectName)}','${escapeHtml(repoUrl)}'); return false;" title="Open deployment for ${escapeHtml(short)}"><code>${short}</code></a>`
+        : "—";
       return `<tr>
-        <td><code>${short}</code></td>
+        <td>${i + 1}</td>
+        <td class="commit-sha">${shaCell}</td>
         <td>${msg}</td>
         <td>${author}</td>
-        <td>${date}</td>
+        <td class="commit-date">${date}</td>
       </tr>`;
     }).join("");
   };
@@ -414,37 +437,46 @@ async function loadProjectDetailCommits(projectId) {
     const filtered = projectName ? all.filter((c) => String(c.projectName || "") === projectName) : all;
     render(filtered);
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="4">No commits available: ${escapeHtml(err.message || "error")}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5">No commits available: ${escapeHtml(err.message || "error")}</td></tr>`;
   }
 }
 
   async function loadAllCommitsPage() {
     const tbody = document.getElementById("commits-page-body");
     if (!tbody) return;
-    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);padding:16px;">Loading commits…</td></tr>';
     window.scrollTo(0, 0);
     document.querySelector(".main")?.scrollTo?.(0, 0);
     try {
+      if (!projects.length) { try { await loadProjects(); } catch {} }
       const data = await api("/airtable/commits");
-      const commits = Array.isArray(data.commits) ? data.commits : [];
+      const commits = sortCommitsByTime(Array.isArray(data.commits) ? data.commits : [], true);
       const subtitle = document.querySelector("#section-commits .section-subtitle");
-      if (subtitle) subtitle.textContent = commits.length ? `${commits.length} commits from Airtable` : "From Airtable Commits table";
+      if (subtitle) subtitle.textContent = commits.length ? `${commits.length} commits from Airtable (newest first, by date & time)` : "From Airtable Commits table";
       if (commits.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">No commits</div><div class="commits-empty-text">No records found in Airtable Commits table.</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6"><div class="commits-empty"><div class="commits-empty-title">No commits</div><div class="commits-empty-text">No records found in Airtable Commits table.</div></div></td></tr>`;
         window.scrollTo(0, 0);
         return;
       }
-      tbody.innerHTML = commits.map((c) => {
+      tbody.innerHTML = commits.map((c, i) => {
         const sha = (c.commitHash || "").toString();
         const short = sha ? sha.slice(0, 7) : "—";
         const msg = escapeHtml((c.message || "").split("\n")[0] || "—");
         const author = escapeHtml(c.author || "—");
-        const project = escapeHtml(c.projectName || "—");
-        const ts = c.timestamp ? escapeHtml(String(c.timestamp)) : "-";
+        const projectName = String(c.projectName || "");
+        const projectLabel = escapeHtml(projectName || "—");
+        const ts = formatDate(c.timestamp);
+        const p = projects.find((x) => String(x.name || "") === projectName);
+        const pid = p ? String(p.id || "") : "";
+        const repoUrl = p ? String(p.repositoryUrl || p.github_repo_url || "") : "";
+        const shaCell = sha
+          ? `<a href="#" class="commit-link commit-pill" onclick="event.preventDefault(); window.openCommitDeployment('${escapeHtml(pid)}','${escapeHtml(sha)}','${escapeHtml(projectName)}','${escapeHtml(repoUrl)}'); return false;" title="Open deployment details for ${escapeHtml(short)}"><code>${short}</code></a>`
+          : "—";
         return `
         <tr class="commit-row">
-          <td class="commit-project">${project}</td>
-          <td class="commit-sha"><span class="commit-pill" title="${escapeHtml(sha)}">${short}</span></td>
+          <td>${i + 1}</td>
+          <td class="commit-project">${projectLabel}</td>
+          <td class="commit-sha">${shaCell}</td>
           <td class="commit-message" title="${msg}">${msg}</td>
           <td class="commit-author">${author}</td>
           <td class="commit-date">${ts}</td>
@@ -452,7 +484,7 @@ async function loadProjectDetailCommits(projectId) {
       }).join("");
       requestAnimationFrame(() => { window.scrollTo(0, 0); document.querySelector(".main")?.scrollTo?.(0, 0); });
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="5"><div class="commits-empty"><div class="commits-empty-title">Airtable not connected</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6"><div class="commits-empty"><div class="commits-empty-title">Airtable not connected</div><div class="commits-empty-text">${escapeHtml(err.message)}</div></div></td></tr>`;
       window.scrollTo(0, 0);
     }
   }
@@ -555,22 +587,54 @@ function renderDeploymentPage(d) {
   setDepTab("deployment");
 }
 
-async function openCommitDeployment(projectId, sha) {
-  if (!projectId || !sha) return showToast("Missing project/commit", "error");
+async function openCommitDeployment(projectId, sha, projectNameHint = "", repoUrlHint = "") {
+  if (!sha) return showToast("Missing commit", "error");
   try {
     showToast(`Opening deployment for ${sha.slice(0,7)}…`, "info");
-    if (!projects.length) { try { projects = await api("/projects"); } catch {} }
-    const data = await api(`/projects/${projectId}/commits/${encodeURIComponent(sha)}/deployment`);
+    if (!projects.length) { try { const p = await api("/airtable/projects"); projects = (p.projects || []).map((x) => ({ ...x, id: x.id || x.name })); } catch {} if (!projects.length) { try { projects = await api("/projects"); } catch {} } }
+
+    const byId = projects.find((p) => String(p.id) === String(projectId));
+    const byName = projectNameHint ? projects.find((p) => String(p.name || "") === String(projectNameHint)) : null;
+    const project = byId || byName || null;
+    const resolvedProjectId = projectId || (project ? project.id : "") || (projectNameHint ? encodeURIComponent(projectNameHint) : "");
+    const projectName = projectNameHint || (project ? String(project.name || "") : "");
+    const repoUrl = repoUrlHint || (project ? String(project.repositoryUrl || project.github_repo_url || "") : "");
+
+    const qs = projectName ? `?projectName=${encodeURIComponent(projectName)}` : "";
+    const data = await api(`/projects/${encodeURIComponent(resolvedProjectId)}/commits/${encodeURIComponent(sha)}/deployment${qs}`);
     let dep = data && data.deployment;
+    const commitMeta = data && data.commit ? data.commit : null;
+    if (projectName || repoUrl) {
+      // ensure project context
+    }
     if (!dep) {
       showToast(`Creating deployment for ${sha.slice(0,7)}…`, "info");
-      const created = await api(`/projects/${projectId}/deploy-commit`, { method: "POST", body: JSON.stringify({ sha }) });
+      const githubToken = (document.getElementById("github-token-input")?.value || localStorage.getItem("github_token") || "").trim();
+      const created = await api(`/projects/${encodeURIComponent(resolvedProjectId)}/deploy-commit`, {
+        method: "POST",
+        body: JSON.stringify({ sha, projectName, repoUrl, ...(githubToken ? { githubToken } : {}) }),
+      });
       dep = created.deployment;
-      if (!dep) throw new Error(created.error || "Deployment was not created");
+      if (!dep) throw new Error(created.error || created.message || "Deployment was not created");
+      if (created.project) {
+        // merge into local projects cache for display
+        const idx = projects.findIndex((p) => String(p.id) === String(created.project.id) || String(p.name) === String(created.project.name));
+        if (idx >= 0) projects[idx] = { ...projects[idx], ...created.project, repositoryUrl: created.project.github_repo_url || projects[idx].repositoryUrl };
+        else projects.unshift({ id: created.project.id, name: created.project.name, repositoryUrl: created.project.github_repo_url || repoUrl });
+      }
     }
     _currentDeploymentId = dep.id;
     const full = await api(`/deployments/${dep.id}`);
-    if (full && !full.commit && data.commit) full.commit = data.commit;
+    if (full && !full.commit && commitMeta) full.commit = commitMeta;
+    if (full && !full.commit) {
+      // best-effort commit info from Airtable for display
+      try {
+        const ac = await api("/airtable/commits");
+        const all = Array.isArray(ac.commits) ? ac.commits : [];
+        const found = all.find((c) => String(c.commitHash || "") === String(sha));
+        if (found) full.commit = { message: found.message, author_name: found.author, author_date: found.timestamp, sha };
+      } catch {}
+    }
     renderDeploymentPage(full);
   } catch (err) {
     showToast(err.message, "error");

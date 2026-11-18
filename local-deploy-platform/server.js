@@ -212,6 +212,36 @@ function isSafeZipEntry(entryName) {
   return true;
 }
 
+async function downloadGitHubZipball(owner, repo, ref, token, destPath) {
+  const authToken = (token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zipball/${encodeURIComponent(ref)}`;
+  const headers = { "User-Agent": "VG-Deploy-Platform", Accept: "application/vnd.github+json" };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  const res = await fetch(url, { headers, redirect: "follow" });
+  if (!res.ok) {
+    let detail = "";
+    try { const j = await res.json(); detail = j && j.message ? String(j.message) : ""; } catch {}
+    const err = new Error(detail || `GitHub archive download failed: ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  fs.writeFileSync(destPath, buf);
+}
+
+function extractZipStrippingRoot(zipPath, destDir) {
+  safeExtractZip(zipPath, destDir);
+  const entries = fs.readdirSync(destDir, { withFileTypes: true });
+  if (entries.length === 1 && entries[0].isDirectory()) {
+    const root = path.join(destDir, entries[0].name);
+    for (const item of fs.readdirSync(root)) {
+      fs.renameSync(path.join(root, item), path.join(destDir, item));
+    }
+    try { fs.rmdirSync(root); } catch {}
+  }
+  return countFilesAndSize(destDir);
+}
+
 // ---------- Airtable integration (dashboard data) ----------
 async function airtableFetchAllRecords(cfg, tableId) {
   if (!cfg.pat) throw new Error("Airtable Personal Access Token is not configured. Add it in Settings or Vercel env (AIRTABLE_PAT).");
@@ -695,10 +725,11 @@ app.get("/api/deployments/:deploymentId", (req, res) => {
 app.get("/api/projects/:projectId/commits/:sha/deployment", (req, res) => {
   try {
     const { projectId, sha } = req.params;
-    const project = getProjectById(projectId);
+    let project = getProjectById(projectId);
+    if (!project && req.query.projectName) project = getProjectByName(String(req.query.projectName));
     if (!project) return res.status(404).json({ error: "Project not found" });
-    const deployment = getDeploymentByCommit(projectId, sha);
-    const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [projectId, sha]);
+    const deployment = getDeploymentByCommit(project.id, sha);
+    const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, sha]);
     res.json({ deployment, commit, project });
   } catch (err) {
     res.status(500).json({ error: "Failed to resolve commit deployment", message: err.message });
@@ -716,33 +747,60 @@ function copyDir(src, dest) {
   }
 }
 
-app.post("/api/projects/:projectId/deploy-commit", (req, res) => {
+app.post("/api/projects/:projectId/deploy-commit", async (req, res) => {
   try {
     const { projectId } = req.params;
-    const { sha, branch } = req.body || {};
+    const { sha, branch, projectName, repoUrl, githubToken } = req.body || {};
     if (!sha || typeof sha !== "string") return res.status(400).json({ error: "Commit SHA is required" });
-    const project = getProjectById(projectId);
+
+    let project = getProjectById(projectId);
+    const nameHint = typeof projectName === "string" ? projectName.trim() : "";
+    if (!project && nameHint) project = getProjectByName(nameHint);
+    if (!project && nameHint) {
+      try { project = createProject(nameHint, "Imported project", "static"); }
+      catch { project = getProjectByName(nameHint); }
+    }
     if (!project) return res.status(404).json({ error: "Project not found" });
-    const repoDir = path.join(WORKSPACE_DIR, projectId, "repo");
-    if (!fs.existsSync(path.join(repoDir, ".git"))) {
-      return res.status(400).json({ error: "No cloned repository found for this project. Re-import the Git repository." });
+
+    const resolvedRepoUrl = String(repoUrl || project.github_repo_url || "").trim();
+    if (resolvedRepoUrl && !project.github_repo_url) {
+      try { setProjectGitHub(project.id, resolvedRepoUrl, "", branch || project.github_branch || "main"); project = getProjectById(project.id) || project; } catch {}
     }
 
-    const existing = getDeploymentByCommit(projectId, sha);
-    if (existing) return res.json({ deployment: existing, reused: true });
+    const existing = getDeploymentByCommit(project.id, sha);
+    if (existing) {
+      const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, sha]);
+      return res.json({ deployment: existing, reused: true, commit, project });
+    }
 
-    const version = getNextVersion(projectId);
-    const deployment = createDeployment(projectId, version, "building", { commitSha: sha, branch: branch || project.github_branch || "main", environment: "production" });
+    const version = getNextVersion(project.id);
+    const deployment = createDeployment(project.id, version, "building", { commitSha: sha, branch: branch || project.github_branch || "main", environment: "production" });
     const deployArtifactDir = path.join(ARTIFACT_DIR, deployment.id);
-    fs.mkdirSync(deployArtifactDir, { recursive: true });
+    ensureWritableDir(deployArtifactDir);
     updateDeployment(deployment.id, { status: "building", build_started_at: now() });
 
     try {
       const tmpZip = path.join(LOG_DIR, `tmp-deploy-${deployment.id}.zip`);
       try { fs.rmSync(tmpZip, { force: true }); } catch {}
-      const archive = spawnSync("git", ["-C", repoDir, "archive", "--format=zip", "-o", tmpZip, sha], { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
-      if (archive.status !== 0 || !fs.existsSync(tmpZip)) throw new Error((archive.stderr || archive.stdout || "git archive failed").trim());
-      safeExtractZip(tmpZip, deployArtifactDir);
+
+      let extracted = false;
+      const repoDir = path.join(WORKSPACE_DIR, project.id, "repo");
+      if (fs.existsSync(path.join(repoDir, ".git"))) {
+        const archive = spawnSync("git", ["-C", repoDir, "archive", "--format=zip", "-o", tmpZip, sha], { encoding: "utf8", maxBuffer: 50 * 1024 * 1024 });
+        if (archive.status === 0 && fs.existsSync(tmpZip)) {
+          safeExtractZip(tmpZip, deployArtifactDir);
+          extracted = true;
+        }
+      }
+
+      if (!extracted) {
+        const parsed = parseGitHubRepoUrl(resolvedRepoUrl);
+        if (!parsed) throw new Error("Cannot deploy commit: no local git repo and repository URL is missing or not a valid GitHub URL.");
+        const authToken = (typeof githubToken === "string" ? githubToken : "").trim() || (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+        await downloadGitHubZipball(parsed.owner, parsed.repo, sha, authToken, tmpZip);
+        extractZipStrippingRoot(tmpZip, deployArtifactDir);
+      }
+
       try { fs.rmSync(tmpZip, { force: true }); } catch {}
 
       const { count: fileCount, totalSize } = countFilesAndSize(deployArtifactDir);
@@ -757,7 +815,8 @@ app.post("/api/projects/:projectId/deploy-commit", (req, res) => {
         log_path: `/api/deployments/${deployment.id}/logs`,
         error_message: null,
       });
-      res.status(201).json({ deployment: updated, reused: false, url: `http://${HOST}:${PORT}/deployments/${updated.id}/` });
+      const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, sha]);
+      res.status(201).json({ deployment: updated, reused: false, project, commit, url: `/deployments/${updated.id}/` });
     } catch (e) {
       try { fs.rmSync(deployArtifactDir, { recursive: true, force: true }); } catch {}
       updateDeployment(deployment.id, { status: "error", build_completed_at: now(), error_message: e.message });
