@@ -63,7 +63,11 @@ async function api(path, options = {}) {
   try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || `HTTP ${res.status}` }; }
   if (!res.ok) {
     const msg = data.error || data.message || `Request failed (${res.status})`;
-    if (res.status === 404 || res.status === 405) throw new Error(msg + " — API not available on static hosting. Run locally: cd local-deploy-platform && npm run dev");
+    const isJsonApiError = data && (Object.prototype.hasOwnProperty.call(data, "error") || Object.prototype.hasOwnProperty.call(data, "message") || data.ok === false);
+    const looksLikeHtml = typeof text === "string" && /^\s*</.test(text);
+    if (!isJsonApiError && looksLikeHtml && (res.status === 404 || res.status === 405)) {
+      throw new Error("API not available on this host. Run locally: cd local-deploy-platform && npm run dev");
+    }
     throw new Error(msg);
   }
   return data;
@@ -600,7 +604,10 @@ async function openCommitDeployment(projectId, sha, projectNameHint = "", repoUr
     const projectName = projectNameHint || (project ? String(project.name || "") : "");
     const repoUrl = repoUrlHint || (project ? String(project.repositoryUrl || project.github_repo_url || "") : "");
 
-    const qs = projectName ? `?projectName=${encodeURIComponent(projectName)}` : "";
+    const params = new URLSearchParams();
+    if (projectName) params.set("projectName", projectName);
+    if (repoUrl) params.set("repoUrl", repoUrl);
+    const qs = params.toString() ? `?${params.toString()}` : "";
     const data = await api(`/projects/${encodeURIComponent(resolvedProjectId)}/commits/${encodeURIComponent(sha)}/deployment${qs}`);
     let dep = data && data.deployment;
     const commitMeta = data && data.commit ? data.commit : null;

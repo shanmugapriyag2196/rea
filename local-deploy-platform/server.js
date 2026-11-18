@@ -725,9 +725,17 @@ app.get("/api/deployments/:deploymentId", (req, res) => {
 app.get("/api/projects/:projectId/commits/:sha/deployment", (req, res) => {
   try {
     const { projectId, sha } = req.params;
+    const nameHint = req.query.projectName ? String(req.query.projectName).trim() : "";
+    const repoUrlHint = req.query.repoUrl ? String(req.query.repoUrl).trim() : "";
     let project = getProjectById(projectId);
-    if (!project && req.query.projectName) project = getProjectByName(String(req.query.projectName));
-    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (!project && nameHint) project = getProjectByName(nameHint);
+    if (!project && nameHint) {
+      try { project = createProject(nameHint, "Imported project", "static"); } catch { project = getProjectByName(nameHint); }
+    }
+    if (project && repoUrlHint && !project.github_repo_url) {
+      try { setProjectGitHub(project.id, repoUrlHint, "", project.github_branch || "main"); project = getProjectById(project.id) || project; } catch {}
+    }
+    if (!project) return res.status(404).json({ error: "Project not found. Re-import the project or provide project name." });
     const deployment = getDeploymentByCommit(project.id, sha);
     const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, sha]);
     res.json({ deployment, commit, project });
