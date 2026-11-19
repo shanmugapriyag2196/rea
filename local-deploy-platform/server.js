@@ -379,6 +379,59 @@ async function syncCommitsToAirtable(commits, projectName) {
   return { ok: true, count: recs.length, created: recs.length, skippedExisting: incoming.length - records.length, total: incoming.length };
 }
 
+function airtableDeploymentId(sha) {
+  return `dpl_${String(sha || "").trim()}`;
+}
+
+function mapAirtableDeployment(rec, { sha, projectName } = {}) {
+  const f = (rec && rec.fields) || {};
+  const depId = String(af(f, "DeploymentId", "Deployment ID", "Id", "ID") || "").trim() || (rec && rec.id) || "";
+  const status = normalizeAirtableStatus(af(f, "Status", "status"));
+  const createdRaw = af(f, "CreatedAt", "Created At", "Timestamp", "Date");
+  const createdMs = createdRaw ? new Date(createdRaw).getTime() : NaN;
+  const durRaw = af(f, "Duration", "BuildDurationMs", "DurationMs", "duration");
+  const durationMs = Number(String(durRaw).replace(/[^0-9.]/g, "")) || 0;
+  const commitSha = String(sha || af(f, "CommitHash", "Commit Hash", "Commit", "SHA") || "").trim();
+  return {
+    id: depId || (rec && rec.id) || "",
+    airtableRecordId: rec && rec.id,
+    status,
+    commit_sha: commitSha,
+    branch: af(f, "Branch", "branch") || "main",
+    created_at: Number.isFinite(createdMs) ? createdMs : Date.now(),
+    build_duration_ms: durationMs,
+    environment: af(f, "Environment", "environment") || "production",
+    url_path: `/deployments/${encodeURIComponent(depId || (rec && rec.id) || "")}`,
+    source: "airtable",
+  };
+}
+
+async function ensureAirtableDeployment(project, sha, branch, commit) {
+  const cfg = getAirtableConfig();
+  if (!cfg.pat || !cfg.deploymentsTableId) return null;
+  const deploymentId = airtableDeploymentId(sha);
+  const all = await airtableFetchAllRecords(cfg, cfg.deploymentsTableId);
+  const existing = (all || []).find((r) => {
+    const f = r.fields || {};
+    return String(af(f, "DeploymentId", "Deployment ID", "Id", "ID") || "").trim() === deploymentId;
+  });
+  if (existing) return mapAirtableDeployment(existing, { sha, projectName: project && project.name });
+
+  const repoUrl = (project && (project.github_repo_url || project.repositoryUrl)) || "";
+  const parsed = parseGitHubRepoUrl(repoUrl);
+  const fields = {
+    DeploymentId: deploymentId,
+    ProjectName: (project && project.name) || "",
+    Status: "ready",
+    Branch: branch || "main",
+    Duration: commit && commit.build_duration_ms ? Number(commit.build_duration_ms) : 0,
+    BuildLogs: commit && commit.message ? String(commit.message).split("\n")[0] : "Imported from commit",
+  };
+  if (parsed) fields.ArtifactPath = `https://github.com/${parsed.owner}/${parsed.repo}/commit/${sha}`;
+  const created = await airtableCreateRecords(cfg, cfg.deploymentsTableId, [fields]);
+  return created && created[0] ? mapAirtableDeployment(created[0], { sha, projectName: project && project.name }) : null;
+}
+
 function af(fields, ...names) {
   for (const n of names) {
     if (fields[n] !== undefined && fields[n] !== null && fields[n] !== "") return fields[n];
@@ -747,26 +800,110 @@ app.get("/api/deployments/:deploymentId", (req, res) => {
   }
 });
 
-app.get("/api/projects/:projectId/commits/:sha/deployment", (req, res) => {
-  try {
-    const { projectId, sha } = req.params;
-    const nameHint = req.query.projectName ? String(req.query.projectName).trim() : "";
-    const repoUrlHint = req.query.repoUrl ? String(req.query.repoUrl).trim() : "";
-    let project = getProjectById(projectId);
-    if (!project && nameHint) project = getProjectByName(nameHint);
-    if (!project && nameHint) {
-      try { project = createProject(nameHint, "Imported project", "static"); } catch { project = getProjectByName(nameHint); }
+app.get("/api/projects/:projectId/commits/:sha/deployment", async (req, res) => {
+  const { projectId, sha } = req.params;
+  const nameHint = req.query.projectName ? String(req.query.projectName).trim() : "";
+  const repoUrlHint = req.query.repoUrl ? String(req.query.repoUrl).trim() : "";
+  const branchHint = req.query.branch ? String(req.query.branch).trim() : "";
+  const safe = (fn, fallback) => {
+    try { return fn(); } catch (e) {
+      console.warn("[vg-deploy] commit-deployment local lookup failed:", e.message);
+      return fallback;
     }
-    if (project && repoUrlHint && !project.github_repo_url) {
-      try { setProjectGitHub(project.id, repoUrlHint, "", project.github_branch || "main"); project = getProjectById(project.id) || project; } catch {}
-    }
-    if (!project) return res.status(404).json({ error: "Project not found. Re-import the project or provide project name." });
-    const deployment = getDeploymentByCommit(project.id, sha);
-    const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, sha]);
-    res.json({ deployment, commit, project });
-  } catch (err) {
-    res.status(500).json({ error: "Failed to resolve commit deployment", message: err.message });
+  };
+
+  // Local DB path (works locally). Each lookup is guarded so a cold/ephemeral
+  // Vercel SQLite DB can never turn this endpoint into a 500.
+  let project = safe(() => getProjectById(projectId), undefined);
+  if (!project && nameHint) project = safe(() => getProjectByName(nameHint), undefined);
+  if (!project && nameHint) {
+    project = safe(() => createProject(nameHint, "Imported project", "static"), undefined)
+      || safe(() => getProjectByName(nameHint), undefined);
   }
+  if (project && repoUrlHint && !project.github_repo_url) {
+    try {
+      setProjectGitHub(project.id, repoUrlHint, "", project.github_branch || "main");
+      project = safe(() => getProjectById(project.id), project) || project;
+    } catch (e) { console.warn("[vg-deploy] setProjectGitHub failed:", e.message); }
+  }
+  let deployment = project ? safe(() => getDeploymentByCommit(project.id, sha), null) : null;
+  let commit = project ? safe(() => get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, sha]), null) : null;
+
+  // Airtable path (works on Vercel where the SQLite DB is ephemeral).
+  let airProject = null;
+  let airCommit = null;
+  if (!project || !deployment || !commit) {
+    try {
+      const cfg = getAirtableConfig();
+      if (cfg.pat && nameHint) {
+        if (!project) {
+          const projects = await airtableFetchAllRecords(cfg, cfg.projectsTableId);
+          const p = projects.find((r) => String(af(r.fields || {}, "Name", "ProjectName", "Project Name") || "").trim() === nameHint);
+          if (p) {
+            const f = p.fields || {};
+            airProject = {
+              id: p.id,
+              name: nameHint,
+              repositoryUrl: af(f, "URL", "Repository URL", "RepositoryUrl", "Repo URL", "RepoURL"),
+              framework: af(f, "Framework", "framework"),
+              created_at: af(f, "CreatedAt", "Created At", "Created"),
+            };
+          }
+        }
+        if (!commit && cfg.commitsTableId) {
+          const commits = await airtableFetchAllRecords(cfg, cfg.commitsTableId);
+          const c = commits.find((r) => {
+            const f = r.fields || {};
+            return String(af(f, "ProjectName", "Project Name", "Project") || "").trim() === nameHint
+              && String(af(f, "CommitHash", "Commit Hash", "Commit", "SHA") || "").trim() === String(sha).trim();
+          });
+          if (c) {
+            const f = c.fields || {};
+            airCommit = {
+              sha,
+              message: af(f, "CommitMessage", "Commit Message", "Message"),
+              author_name: af(f, "Author", "author"),
+              author_date: af(f, "Timestamp", "timestamp"),
+            };
+          }
+        }
+        if (!deployment) {
+          const branch = branchHint || (project && project.github_branch) || "main";
+          deployment = await ensureAirtableDeployment(project || airProject || { name: nameHint }, sha, branch, commit || airCommit);
+        }
+      }
+    } catch (e) {
+      console.warn("[vg-deploy] commit-deployment airtable lookup failed:", e.message);
+    }
+  }
+
+  const projectOut = project || airProject || { id: projectId, name: nameHint, repositoryUrl: repoUrlHint, framework: "static" };
+  if (!projectOut || !projectOut.name) {
+    return res.status(404).json({ error: "Project not found. Re-import the project or provide a project name." });
+  }
+  const commitOut = commit || airCommit || { sha, message: "", author_name: "", author_date: "" };
+
+  if (!deployment && IS_VERCEL) {
+    // Synthetic (not persisted) so the UI can render details without forcing a heavy build.
+    deployment = {
+      id: airtableDeploymentId(sha),
+      status: "ready",
+      commit_sha: sha,
+      branch: branchHint || projectOut.github_branch || "main",
+      created_at: Date.now(),
+      build_duration_ms: 0,
+      environment: "production",
+      file_count: 0,
+      total_size: 0,
+      source: "synthetic",
+      persisted: false,
+    };
+  }
+  if (deployment) {
+    deployment.project = projectOut;
+    deployment.commit = commitOut;
+  }
+  res.json({ deployment: deployment || null, commit: commitOut, project: projectOut });
 });
 
 function copyDir(src, dest) {
@@ -849,6 +986,8 @@ app.post("/api/projects/:projectId/deploy-commit", async (req, res) => {
         error_message: null,
       });
       const commit = get("SELECT * FROM repository_commits WHERE project_id = ? AND sha = ? LIMIT 1", [project.id, sha]);
+      try { await ensureAirtableDeployment(project, sha, branch || project.github_branch || "main", updated); }
+      catch (e) { console.warn("[vg-deploy] deployment airtable sync failed:", e.message); }
       res.status(201).json({ deployment: updated, reused: false, project, commit, url: `/deployments/${updated.id}/` });
     } catch (e) {
       try { fs.rmSync(deployArtifactDir, { recursive: true, force: true }); } catch {}

@@ -551,7 +551,8 @@ function renderDeploymentPage(d) {
   const sha = (d.commit_sha || "").toString();
   const short = sha ? sha.slice(0,7) : (d.id || "").slice(0,8);
   const status = d.status || "pending";
-  const url = status === "ready" ? `${location.origin}/deployments/${d.id}/` : "";
+  const isAirtableOnly = d.source === "airtable" || d.source === "synthetic";
+  const url = d.url ? String(d.url) : (!isAirtableOnly && status === "ready" ? `${location.origin}/deployments/${d.id}/` : "");
   const branch = d.branch || project.github_branch || "main";
   const domains = Array.isArray(d.domains) ? d.domains : [];
 
@@ -611,9 +612,7 @@ async function openCommitDeployment(projectId, sha, projectNameHint = "", repoUr
     const data = await api(`/projects/${encodeURIComponent(resolvedProjectId)}/commits/${encodeURIComponent(sha)}/deployment${qs}`);
     let dep = data && data.deployment;
     const commitMeta = data && data.commit ? data.commit : null;
-    if (projectName || repoUrl) {
-      // ensure project context
-    }
+    const projectMeta = data && data.project ? data.project : null;
     if (!dep) {
       showToast(`Creating deployment for ${sha.slice(0,7)}…`, "info");
       const githubToken = (document.getElementById("github-token-input")?.value || localStorage.getItem("github_token") || "").trim();
@@ -631,9 +630,16 @@ async function openCommitDeployment(projectId, sha, projectNameHint = "", repoUr
       }
     }
     _currentDeploymentId = dep.id;
-    const full = await api(`/deployments/${dep.id}`);
-    if (full && !full.commit && commitMeta) full.commit = commitMeta;
-    if (full && !full.commit) {
+    // The deployment may only exist in Airtable (Vercel has an ephemeral DB),
+    // so prefer the resolved record and only enrich it from the local endpoint.
+    let full = dep;
+    try {
+      const fetched = await api(`/deployments/${encodeURIComponent(dep.id)}`);
+      if (fetched && fetched.id) full = { ...dep, ...fetched };
+    } catch {}
+    if (!full.project && projectMeta) full.project = projectMeta;
+    if (!full.commit && commitMeta) full.commit = commitMeta;
+    if (!full.commit) {
       // best-effort commit info from Airtable for display
       try {
         const ac = await api("/airtable/commits");

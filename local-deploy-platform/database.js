@@ -555,6 +555,8 @@ module.exports = {
   updateDeployment,
   getNextVersion,
   run,
+  get,
+  all,
   setEnvVar,
   listEnvVars,
   deleteEnvVar,
