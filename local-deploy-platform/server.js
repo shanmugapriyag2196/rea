@@ -290,6 +290,31 @@ async function airtableCreateRecords(cfg, tableId, records) {
   return created;
 }
 
+async function airtableUpdateRecords(cfg, tableId, records) {
+  if (!cfg.pat) throw new Error("Airtable PAT not configured");
+  if (!cfg.baseId || !tableId) throw new Error("Airtable Base/Table ID not configured");
+  const updated = [];
+  for (let i = 0; i < records.length; i += 10) {
+    const batch = records.slice(i, i + 10).map((r) => ({ id: r.id, fields: r.fields }));
+    const url = `https://api.airtable.com/v0/${cfg.baseId}/${tableId}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${cfg.pat}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ records: batch, typecast: true }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg = data?.error?.message || data?.error?.type || `Airtable update error ${res.status}`;
+      throw new Error(msg);
+    }
+    for (const r of data.records || []) updated.push(r);
+  }
+  return updated;
+}
+
 function toAirtableDate(ts) {
   if (!ts) return undefined;
   try {
