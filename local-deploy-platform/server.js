@@ -902,6 +902,10 @@ app.get("/api/projects/:projectId/commits/:sha/deployment", async (req, res) => 
   if (deployment) {
     deployment.project = projectOut;
     deployment.commit = commitOut;
+    if (!deployment.url) {
+      const repoForUrl = projectOut.github_repo_url || projectOut.repositoryUrl || repoUrlHint || "";
+      deployment.url = `/deployments/${encodeURIComponent(deployment.id)}/` + (repoForUrl ? `?repoUrl=${encodeURIComponent(repoForUrl)}` : "");
+    }
   }
   res.json({ deployment: deployment || null, commit: commitOut, project: projectOut });
 });
@@ -1315,57 +1319,169 @@ app.delete("/api/projects/:projectId/github/disconnect", (req, res) => {
 });
 
 // ---------- Static file serving for deployments ----------
-app.use("/deployments", (req, res, next) => {
-  const deploymentId = req.path.split("/")[1];
-  if (!deploymentId) return next();
+const DEPLOYMENT_INDEX_CANDIDATES = [
+  "index.html",
+  "dist/index.html",
+  "build/index.html",
+  "public/index.html",
+  "out/index.html",
+  "src/index.html",
+];
+const deploymentMaterializeInFlight = new Map();
 
-  const deployment = getDeploymentById(deploymentId);
-  if (!deployment || deployment.status !== "ready") {
-    return res.status(404).json({ error: "Deployment not found or not ready" });
-  }
-
-  // Serve the file from the artifact directory
-  const relativePath = req.path.slice(`/deployments/${deploymentId}`.length) || "/";
-  const filePath = path.join(deployment.artifact_path || path.join(ARTIFACT_DIR, deploymentId), relativePath);
-
-  // Security: prevent path traversal
-  const resolvedArtifactDir = path.resolve(deployment.artifact_path || path.join(ARTIFACT_DIR, deploymentId));
-  const resolvedFilePath = path.resolve(filePath);
-  if (!resolvedFilePath.startsWith(resolvedArtifactDir + path.sep) && resolvedFilePath !== resolvedArtifactDir) {
-    return res.status(403).json({ error: "Access denied" });
-  }
-
-  if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    const ext = path.extname(filePath).toLowerCase();
-    const mimeTypes = {
-      ".html": "text/html",
-      ".css": "text/css",
-      ".js": "application/javascript",
-      ".json": "application/json",
-      ".png": "image/png",
-      ".jpg": "image/jpeg",
-      ".jpeg": "image/jpeg",
-      ".gif": "image/gif",
-      ".svg": "image/svg+xml",
-      ".ico": "image/x-icon",
-      ".txt": "text/plain",
-      ".woff": "font/woff",
-      ".woff2": "font/woff2",
-      ".ttf": "font/ttf",
-      ".eot": "application/vnd.ms-fontobject",
-    };
-    res.setHeader("Content-Type", mimeTypes[ext] || "application/octet-stream");
-    res.sendFile(filePath);
-  } else if (relativePath === "/" || relativePath === "") {
-    const indexPath = path.join(deployment.artifact_path || path.join(ARTIFACT_DIR, deploymentId), "index.html");
-    if (fs.existsSync(indexPath)) {
-      res.setHeader("Content-Type", "text/html");
-      res.sendFile(indexPath);
-    } else {
-      res.status(404).json({ error: "No index.html found" });
+function findDeploymentRoot(dir) {
+  if (!dir) return null;
+  try {
+    for (const marker of DEPLOYMENT_INDEX_CANDIDATES) {
+      const full = path.join(dir, marker);
+      if (fs.existsSync(full) && fs.statSync(full).isFile()) return path.dirname(full);
     }
-  } else {
-    res.status(404).json({ error: "File not found" });
+  } catch {}
+  return null;
+}
+
+async function resolveAirtableDeploymentContext(deploymentId) {
+  try {
+    const cfg = getAirtableConfig();
+    if (!cfg.pat) return null;
+    const deps = await airtableFetchAllRecords(cfg, cfg.deploymentsTableId);
+    const rec = (deps || []).find((r) => String(af(r.fields || {}, "DeploymentId", "Deployment ID", "Id", "ID") || "").trim() === deploymentId);
+    if (!rec) return null;
+    const projectName = String(af(rec.fields || {}, "ProjectName", "Project Name", "Project") || "").trim();
+    let repoUrl = "";
+    if (projectName) {
+      try {
+        const projects = await airtableFetchAllRecords(cfg, cfg.projectsTableId);
+        const pr = projects.find((r) => String(af(r.fields || {}, "Name", "ProjectName", "Project Name") || "").trim() === projectName);
+        if (pr) repoUrl = af(pr.fields || {}, "URL", "Repository URL", "RepositoryUrl", "Repo URL", "RepoURL");
+      } catch {}
+    }
+    return { sha: deploymentId.startsWith("dpl_") ? deploymentId.slice(4) : "", projectName, repoUrl };
+  } catch (e) {
+    console.warn("[vg-deploy] airtable deployment context failed:", e.message);
+    return null;
+  }
+}
+
+async function ensureDeploymentArtifact(deploymentId, sha, repoUrl, preferredRoot) {
+  const candidates = [];
+  if (preferredRoot) candidates.push(preferredRoot);
+  candidates.push(path.join(ARTIFACT_DIR, deploymentId));
+  for (const dir of candidates) {
+    const root = findDeploymentRoot(dir);
+    if (root) return root;
+  }
+  const parsed = parseGitHubRepoUrl(repoUrl);
+  if (!sha || !parsed) return null;
+  if (deploymentMaterializeInFlight.has(deploymentId)) return deploymentMaterializeInFlight.get(deploymentId);
+
+  const task = (async () => {
+    const dir = path.join(ARTIFACT_DIR, deploymentId);
+    ensureWritableDir(dir);
+    const zip = path.join(LOG_DIR, `rebuild-${deploymentId}.zip`);
+    try { fs.rmSync(zip, { force: true }); } catch {}
+    const token = (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "").trim();
+    await downloadGitHubZipball(parsed.owner, parsed.repo, sha, token, zip);
+    extractZipStrippingRoot(zip, dir);
+    try { fs.rmSync(zip, { force: true }); } catch {}
+    return findDeploymentRoot(dir);
+  })();
+  deploymentMaterializeInFlight.set(deploymentId, task);
+  try {
+    return await task;
+  } finally {
+    deploymentMaterializeInFlight.delete(deploymentId);
+  }
+}
+
+app.use("/deployments", async (req, res, next) => {
+  try {
+    const deploymentId = decodeURIComponent((req.path.split("/")[1] || "").split("?")[0]);
+    if (!deploymentId) return next();
+
+    let sha = "";
+    let repoUrl = req.query.repoUrl ? String(req.query.repoUrl) : "";
+    let preferredRoot = "";
+
+    const local = getDeploymentById(deploymentId);
+    if (local) {
+      sha = local.commit_sha || "";
+      preferredRoot = local.artifact_path || "";
+      if (!repoUrl) {
+        const proj = getProjectById(local.project_id);
+        repoUrl = (proj && proj.github_repo_url) || "";
+      }
+    } else if (deploymentId.startsWith("dpl_")) {
+      sha = deploymentId.slice(4);
+      if (!repoUrl) {
+        const ctx = await resolveAirtableDeploymentContext(deploymentId);
+        if (ctx) repoUrl = ctx.repoUrl || "";
+      }
+    } else {
+      return res.status(404).json({ error: "Deployment not found" });
+    }
+
+    const root = await ensureDeploymentArtifact(deploymentId, sha, repoUrl, preferredRoot);
+    if (!root) {
+      return res.status(404).json({
+        error: "Deployment artifact unavailable",
+        message: "Provide ?repoUrl=<github url> or configure GITHUB_TOKEN so the commit can be fetched.",
+      });
+    }
+
+    let rel = req.path.slice(1 + deploymentId.length) || "/";
+    try { rel = decodeURIComponent(rel.split("?")[0]); } catch {}
+    if (rel.includes("\0")) return res.status(400).json({ error: "Invalid path" });
+    const cleaned = "/" + path.normalize(rel).replace(/^([/\\])+/, "");
+    const resolvedRoot = path.resolve(root);
+    let filePath = path.resolve(path.join(root, cleaned));
+    if (filePath !== resolvedRoot && !filePath.startsWith(resolvedRoot + path.sep)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+    try {
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) filePath = path.join(filePath, "index.html");
+    } catch {}
+
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const mimeTypes = {
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
+        ".mjs": "application/javascript; charset=utf-8",
+        ".json": "application/json; charset=utf-8",
+        ".map": "application/json; charset=utf-8",
+        ".txt": "text/plain; charset=utf-8",
+        ".xml": "application/xml; charset=utf-8",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".otf": "font/otf",
+        ".eot": "application/vnd.ms-fontobject",
+        ".wasm": "application/wasm",
+      };
+      res.setHeader("Content-Type", mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream");
+      return res.sendFile(filePath);
+    }
+
+    // SPA fallback: serve index.html for extensionless routes.
+    if (!path.extname(rel) || rel === "/" || rel === "") {
+      const idx = path.join(root, "index.html");
+      if (fs.existsSync(idx)) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        return res.sendFile(idx);
+      }
+    }
+    return res.status(404).json({ error: "File not found" });
+  } catch (e) {
+    console.warn("[vg-deploy] deployment serve failed:", e.message);
+    return res.status(502).json({ error: "Failed to serve deployment", message: e.message });
   }
 });
 
