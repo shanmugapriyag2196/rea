@@ -1,0 +1,6 @@
+const path = require('path')
+const Database = require('better-sqlite3')
+const dbPath = path.join(__dirname, 'data', 'launchforge.db')
+const db = new Database(dbPath, { readonly: true })
+const rows = db.prepare('SELECT * FROM projects').all()
+console.log('projects:', JSON.stringify(rows, null, 2))

@@ -383,6 +383,21 @@ function airtableDeploymentId(sha) {
   return `dpl_${String(sha || "").trim()}`;
 }
 
+function slugifyProjectName(name) {
+  const s = String(name || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  return s || "deployment";
+}
+
+function deploymentAlias(projectName, sha) {
+  const full = String(sha || "").trim();
+  const short = full ? full.slice(0, 7) : Math.random().toString(16).slice(2, 9);
+  return `${slugifyProjectName(projectName)}-${short}`;
+}
+
 function mapAirtableDeployment(rec, { sha, projectName } = {}) {
   const f = (rec && rec.fields) || {};
   const depId = String(af(f, "DeploymentId", "Deployment ID", "Id", "ID") || "").trim() || (rec && rec.id) || "";
@@ -392,8 +407,10 @@ function mapAirtableDeployment(rec, { sha, projectName } = {}) {
   const durRaw = af(f, "Duration", "BuildDurationMs", "DurationMs", "duration");
   const durationMs = Number(String(durRaw).replace(/[^0-9.]/g, "")) || 0;
   const commitSha = String(sha || af(f, "CommitHash", "Commit Hash", "Commit", "SHA") || "").trim();
+  const alias = deploymentAlias(projectName, commitSha);
   return {
     id: depId || (rec && rec.id) || "",
+    alias,
     airtableRecordId: rec && rec.id,
     status,
     commit_sha: commitSha,
@@ -487,8 +504,11 @@ function parseZipBuffer(buffer) {
 }
 
 function safeExtractZip(zipPath, destDir) {
-  const MAX_FILES = 10000;
+  const MAX_FILES = 60000;
   const MAX_TOTAL_SIZE = 1024 * 1024 * 1024; // 1 GB
+  // Skip vendored/dependency trees: they are never part of a static deploy and
+  // inflate archives massively (a committed node_modules can add tens of thousands of files).
+  const SKIP_SEGMENTS = new Set(["node_modules", ".git", ".cache", ".next", ".turbo"]);
 
   const fd = fs.openSync(zipPath, "r");
   const stat = fs.fstatSync(fd);
@@ -501,16 +521,17 @@ function safeExtractZip(zipPath, destDir) {
   let totalSize = 0;
   let fileCount = 0;
 
-  if (entries.length > MAX_FILES) {
-    throw new Error(`Too many files in archive: ${entries.length} (max ${MAX_FILES})`);
-  }
-
   for (const entry of entries) {
     if (!isSafeZipEntry(entry.name)) {
       throw new Error(`Unsafe ZIP entry detected: ${entry.name}`);
     }
 
     if (entry.name.endsWith("/") || entry.name.endsWith("\\")) {
+      continue;
+    }
+
+    const segments = entry.name.split(/[\\/]+/).filter(Boolean);
+    if (segments.some((seg) => SKIP_SEGMENTS.has(seg))) {
       continue;
     }
 
@@ -887,6 +908,7 @@ app.get("/api/projects/:projectId/commits/:sha/deployment", async (req, res) => 
     // Synthetic (not persisted) so the UI can render details without forcing a heavy build.
     deployment = {
       id: airtableDeploymentId(sha),
+      alias: deploymentAlias(projectOut.name, sha),
       status: "ready",
       commit_sha: sha,
       branch: branchHint || projectOut.github_branch || "main",
@@ -902,9 +924,10 @@ app.get("/api/projects/:projectId/commits/:sha/deployment", async (req, res) => 
   if (deployment) {
     deployment.project = projectOut;
     deployment.commit = commitOut;
+    if (!deployment.alias) deployment.alias = deploymentAlias(projectOut.name, deployment.commit_sha || sha);
     if (!deployment.url) {
       const repoForUrl = projectOut.github_repo_url || projectOut.repositoryUrl || repoUrlHint || "";
-      deployment.url = `/deployments/${encodeURIComponent(deployment.id)}/` + (repoForUrl ? `?repoUrl=${encodeURIComponent(repoForUrl)}` : "");
+      deployment.url = `/deployments/${encodeURIComponent(deployment.alias)}/` + (repoForUrl ? `?repoUrl=${encodeURIComponent(repoForUrl)}` : "");
     }
   }
   res.json({ deployment: deployment || null, commit: commitOut, project: projectOut });
@@ -1329,15 +1352,51 @@ const DEPLOYMENT_INDEX_CANDIDATES = [
 ];
 const deploymentMaterializeInFlight = new Map();
 
+function rewriteDeploymentHtml(html, prefix) {
+  // Built bundles (Vite/CRA/etc.) reference root-absolute assets like "/assets/x.js".
+  // Under a path-hosted deployment those must resolve beneath the deployment prefix.
+  const assetPrefixes = "assets|static|favicon|logo|images|img|fonts|manifest|robots|apple-touch|vite\\.svg|webmanifest|_next";
+  const re = new RegExp(`(href|src)=(["'])\\/(${assetPrefixes})`, "gi");
+  return String(html).replace(re, `$1=$2${prefix}/$3`);
+}
+
 function findDeploymentRoot(dir) {
   if (!dir) return null;
-  try {
-    for (const marker of DEPLOYMENT_INDEX_CANDIDATES) {
-      const full = path.join(dir, marker);
-      if (fs.existsSync(full) && fs.statSync(full).isFile()) return path.dirname(full);
+  const isFile = (p) => {
+    try { return fs.existsSync(p) && fs.statSync(p).isFile(); } catch { return false; }
+  };
+  // Fast path: well-known output dirs at the archive root.
+  for (const marker of DEPLOYMENT_INDEX_CANDIDATES) {
+    const full = path.join(dir, marker);
+    if (isFile(full)) return path.dirname(full);
+  }
+  // Recursive search: many repos keep the built site under e.g. `client/dist`,
+  // `apps/web/out`, etc. Prefer built-output folders over source `index.html`.
+  const found = [];
+  const walk = (d, depth) => {
+    if (depth > 8) return;
+    let entries;
+    try { entries = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (entry.name === "node_modules" || entry.name === ".git") continue;
+      const full = path.join(d, entry.name);
+      if (entry.isDirectory()) walk(full, depth + 1);
+      else if (entry.isFile() && entry.name === "index.html") found.push(full);
     }
-  } catch {}
-  return null;
+  };
+  walk(dir, 0);
+  if (!found.length) return null;
+  const score = (p) => {
+    const low = p.replace(/\\/g, "/").toLowerCase();
+    if (/\/dist\/index\.html$/.test(low)) return 0;
+    if (/\/build\/index\.html$/.test(low)) return 1;
+    if (/\/out\/index\.html$/.test(low)) return 2;
+    if (/\/public\/index\.html$/.test(low)) return 3;
+    if (/\/client\/index\.html$/.test(low)) return 6;
+    return 4;
+  };
+  found.sort((a, b) => score(a) - score(b) || a.length - b.length);
+  return path.dirname(found[0]);
 }
 
 async function resolveAirtableDeploymentContext(deploymentId) {
@@ -1418,7 +1477,16 @@ app.use("/deployments", async (req, res, next) => {
         if (ctx) repoUrl = ctx.repoUrl || "";
       }
     } else {
-      return res.status(404).json({ error: "Deployment not found" });
+      // Clean alias form: <project-slug>-<shortsha>
+      const aliasMatch = String(deploymentId).match(/-([0-9a-f]{7,40})$/i);
+      if (!aliasMatch) return res.status(404).json({ error: "Deployment not found" });
+      sha = aliasMatch[1];
+      if (!repoUrl) {
+        try {
+          const ctx = await resolveAirtableDeploymentContext(deploymentId);
+          if (ctx && ctx.repoUrl) repoUrl = ctx.repoUrl;
+        } catch {}
+      }
     }
 
     const root = await ensureDeploymentArtifact(deploymentId, sha, repoUrl, preferredRoot);
@@ -1443,6 +1511,7 @@ app.use("/deployments", async (req, res, next) => {
     } catch {}
 
     if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      const ext = path.extname(filePath).toLowerCase();
       const mimeTypes = {
         ".html": "text/html; charset=utf-8",
         ".css": "text/css; charset=utf-8",
@@ -1466,7 +1535,13 @@ app.use("/deployments", async (req, res, next) => {
         ".eot": "application/vnd.ms-fontobject",
         ".wasm": "application/wasm",
       };
-      res.setHeader("Content-Type", mimeTypes[path.extname(filePath).toLowerCase()] || "application/octet-stream");
+      res.setHeader("Content-Type", mimeTypes[ext] || "application/octet-stream");
+      if (ext === ".html") {
+        try {
+          const html = fs.readFileSync(filePath, "utf8");
+          return res.send(rewriteDeploymentHtml(html, `/deployments/${encodeURIComponent(deploymentId)}`));
+        } catch {}
+      }
       return res.sendFile(filePath);
     }
 
@@ -1474,8 +1549,14 @@ app.use("/deployments", async (req, res, next) => {
     if (!path.extname(rel) || rel === "/" || rel === "") {
       const idx = path.join(root, "index.html");
       if (fs.existsSync(idx)) {
-        res.setHeader("Content-Type", "text/html; charset=utf-8");
-        return res.sendFile(idx);
+        try {
+          const html = fs.readFileSync(idx, "utf8");
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          return res.send(rewriteDeploymentHtml(html, `/deployments/${encodeURIComponent(deploymentId)}`));
+        } catch {
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          return res.sendFile(idx);
+        }
       }
     }
     return res.status(404).json({ error: "File not found" });

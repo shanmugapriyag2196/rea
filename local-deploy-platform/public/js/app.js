@@ -567,7 +567,13 @@ function renderDeploymentPage(d) {
   set("dep-status", `${statusBadge(status)}${status === "ready" ? ' <span style="color:var(--muted);font-size:12px;margin-left:6px;">Current</span>' : ''}`);
   txt("dep-duration", formatDuration(d.build_duration_ms));
   set("dep-env", `<strong style="color:#fff;">${escapeHtml((d.environment || "production").replace(/^./, c=>c.toUpperCase()))}</strong>${status === "ready" ? ' <span class="dep-pill">Current</span>' : ''}`);
-  set("dep-domains", domains.length ? domains.map(x => `<div><span style="color:#fff;">${escapeHtml(x.name || x.domain)}</span></div>`).join("") : (url ? `<a href="${url}" target="_blank" rel="noopener" style="color:#fff;">${escapeHtml(location.host)}/deployments/${escapeHtml(d.id)}/</a>` : '<span style="color:var(--muted);">No domain</span>'));
+  let domainLabel = d.alias || "";
+  if (!domainLabel && url) {
+    const m = String(url).match(/\/deployments\/([^/?#]+)/);
+    if (m) { try { domainLabel = decodeURIComponent(m[1]); } catch {} }
+  }
+  if (!domainLabel) domainLabel = d.id || "";
+  set("dep-domains", domains.length ? domains.map(x => `<div><span style="color:#fff;">${escapeHtml(x.name || x.domain)}</span></div>`).join("") : (url ? `<a href="${url}" target="_blank" rel="noopener" style="color:#fff;">${escapeHtml(domainLabel)}</a>` : '<span style="color:var(--muted);">No domain</span>'));
   set("dep-source", `<div><span class="dep-pill">${escapeHtml(branch)}</span></div><div style="margin-top:6px;"><code>${escapeHtml(short)}</code> ${d.commit?.message ? `<span style="color:#ccc;">${escapeHtml((d.commit.message||'').split('\n')[0])}</span>` : ''}</div>`);
 
   txt("dep-build-summary", status === "ready" ? `Build completed in ${formatDuration(d.build_duration_ms)} · ${d.file_count || 0} files` : (d.error_message ? d.error_message : "—"));
